@@ -246,12 +246,16 @@ export class ZigbeeRunner {
 
     const enabled = settings.networks.filter((net) => net.enabled);
     if (enabled.some((net) => net.coordinator === "espos")) {
-      this.discovery = new CoordinatorDiscovery(() => this.onDiscoveryChange());
-      await this.discovery.start();
+      const discovery = new CoordinatorDiscovery(() =>
+        this.onDiscoveryChange(),
+      );
+      this.discovery = discovery;
+      await discovery.start();
       if (signal.aborted) {
-        // stop() ran while discovery was starting and found nothing to stop.
-        this.discovery.stop();
-        this.discovery = undefined;
+        // stop() may have run before this instance existed; release it
+        // here, and leave a newer run's discovery alone.
+        discovery.stop();
+        if (this.discovery === discovery) this.discovery = undefined;
         return;
       }
     }

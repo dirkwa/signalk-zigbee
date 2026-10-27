@@ -309,9 +309,13 @@
           const res = await fetch(`${API}/frontend-tokens`, {
             credentials: "same-origin",
           });
-          if (res.ok) tokens = await res.json();
-          else if (res.status === 401 || res.status === 403)
+          if (res.ok) {
+            tokens = await res.json();
+          } else if (res.status === 401 || res.status === 403) {
+            // Not (or no longer) an admin: drop tokens an earlier session saw.
+            tokens = {};
             tokensDenied = true;
+          }
         } catch {
           // Keep the last tokens; the links still work without one.
         }

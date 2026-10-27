@@ -91,7 +91,8 @@ export class CoordinatorDiscovery {
   private bonjour: BonjourLike | undefined;
   private browser: Browser | undefined;
   private readonly found = new Map<string, Coordinator>();
-  private stopped = false;
+  /** Bumped by every start and stop; a start that lost the race backs out. */
+  private generation = 0;
 
   constructor(
     private readonly onChange: () => void,
@@ -100,12 +101,12 @@ export class CoordinatorDiscovery {
 
   async start(): Promise<void> {
     if (this.browser !== undefined) return;
-    this.stopped = false;
+    const generation = ++this.generation;
     const bonjour = this.createBonjour
       ? await this.createBonjour()
       : new (await import("bonjour-service")).Bonjour();
-    if (this.stopped) {
-      // stop() ran while the import was pending.
+    if (generation !== this.generation) {
+      // stop() or a newer start() ran while the import was pending.
       bonjour.destroy();
       return;
     }
@@ -134,7 +135,7 @@ export class CoordinatorDiscovery {
   }
 
   stop(): void {
-    this.stopped = true;
+    this.generation++;
     try {
       this.browser?.stop();
       this.bonjour?.destroy();

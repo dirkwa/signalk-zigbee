@@ -113,4 +113,31 @@ describe("CoordinatorDiscovery", () => {
     await starting;
     expect(destroyed).toBe(1);
   });
+
+  it("does not revive a start that a stop and restart overtook", async () => {
+    const pending: ((b: BonjourLike) => void)[] = [];
+    let browsing = 0;
+    let destroyed = 0;
+    const bonjour = (): BonjourLike => ({
+      find: () => {
+        browsing++;
+        return new FakeBrowser();
+      },
+      destroy: () => destroyed++,
+    });
+    const discovery = new CoordinatorDiscovery(
+      () => {},
+      () => new Promise<BonjourLike>((resolve) => pending.push(resolve)),
+    );
+    const first = discovery.start();
+    discovery.stop();
+    const second = discovery.start();
+    pending[1]!(bonjour());
+    pending[0]!(bonjour());
+    await Promise.all([first, second]);
+    expect(browsing).toBe(1);
+    expect(destroyed).toBe(1);
+    discovery.stop();
+    expect(destroyed).toBe(2);
+  });
 });
