@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zigbee</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --text: #1d2330;
+        --muted: #5f6b7a;
+        --line: #dde2e8;
+        --accent: #1f6feb;
+        --ok: #1a7f37;
+        --warn: #9a6700;
+        --bad: #cf222e;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #10141a;
+          --card: #181d25;
+          --text: #e6e9ee;
+          --muted: #98a2b0;
+          --line: #2a313c;
+          --accent: #58a6ff;
+          --ok: #3fb950;
+          --warn: #d29922;
+          --bad: #f85149;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.45 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.3rem;
+        margin: 0 0 12px;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin-bottom: 14px;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+      }
+      h2 {
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .state {
+        font-weight: 600;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .warn {
+        color: var(--warn);
+      }
+      .bad {
+        color: var(--bad);
+      }
+      .actions {
+        margin-left: auto;
+        display: flex;
+        gap: 8px;
+      }
+      a,
+      button {
+        font: inherit;
+        color: var(--accent);
+      }
+      button {
+        background: none;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+      }
+      .table {
+        overflow-x: auto;
+        margin-top: 10px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 6px 8px;
+        border-top: 1px solid var(--line);
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+      }
+      code {
+        font-size: 0.9em;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Zigbee</h1>
+      <div id="root" class="muted">Loading…</div>
+    </main>
+    <script>
+      const API = "/plugins/signalk-zigbee/api";
+      const root = document.getElementById("root");
+
+      function el(tag, attrs, ...children) {
+        const node = document.createElement(tag);
+        for (const [key, value] of Object.entries(attrs || {})) {
+          if (key === "onclick") node.onclick = value;
+          else node.setAttribute(key, value);
+        }
+        for (const child of children) {
+          if (child != null) node.append(child);
+        }
+        return node;
+      }
+
+      function stateOf(net) {
+        if (net.phase === "running") {
+          if (net.online === true) return ["online", "ok"];
+          if (net.online === false) return ["Zigbee2MQTT offline", "bad"];
+          return ["Zigbee2MQTT starting", "warn"];
+        }
+        if (net.phase === "error") return [net.message || "error", "bad"];
+        if (net.phase === "disabled") return ["disabled", "muted"];
+        return [net.message || net.phase, "warn"];
+      }
+
+      async function permitJoin(id, button) {
+        button.disabled = true;
+        try {
+          const res = await fetch(
+            `${API}/networks/${encodeURIComponent(id)}/permit-join`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ seconds: 254 }),
+            },
+          );
+          const body = await res.json();
+          button.textContent = res.ok
+            ? "Pairing open (~4 min)"
+            : body.error || "Failed";
+        } catch (err) {
+          button.textContent = String(err);
+        }
+      }
+
+      function network(net) {
+        const [label, cls] = stateOf(net);
+        const frontend = `${location.protocol}//${location.hostname}:${net.frontendPort}/`;
+        const pair = el("button", {}, "Allow pairing");
+        pair.onclick = () => permitJoin(net.id, pair);
+        const rows = net.devices.map((d) =>
+          el(
+            "tr",
+            {},
+            el(
+              "td",
+              {},
+              d.friendlyName,
+              el("div", { class: "muted" }, d.ieeeAddress),
+            ),
+            el("td", {}, [d.vendor, d.model].filter(Boolean).join(" ")),
+            el(
+              "td",
+              {},
+              d.enabled
+                ? el("code", {}, d.basePath)
+                : el("span", { class: "muted" }, "not published"),
+            ),
+            el("td", {}, String(d.paths.length)),
+          ),
+        );
+        return el(
+          "section",
+          {},
+          el(
+            "header",
+            {},
+            el("h2", {}, net.id),
+            el("span", { class: `state ${cls}` }, label),
+            el(
+              "span",
+              { class: "muted" },
+              net.coordinator === "espos"
+                ? `espOS ${net.coordinatorAddress || ""}`
+                : "USB",
+            ),
+            el(
+              "span",
+              { class: "actions" },
+              net.phase === "running" ? pair : null,
+              net.phase === "running"
+                ? el(
+                    "a",
+                    { href: frontend, target: "_blank", rel: "noopener" },
+                    "Zigbee2MQTT ↗",
+                  )
+                : null,
+            ),
+          ),
+          rows.length
+            ? el(
+                "div",
+                { class: "table" },
+                el(
+                  "table",
+                  {},
+                  el(
+                    "thead",
+                    {},
+                    el(
+                      "tr",
+                      {},
+                      el("th", {}, "Device"),
+                      el("th", {}, "Model"),
+                      el("th", {}, "Signal K path"),
+                      el("th", {}, "Values"),
+                    ),
+                  ),
+                  el("tbody", {}, ...rows),
+                ),
+              )
+            : el("p", { class: "muted" }, "No devices paired yet."),
+        );
+      }
+
+      function render(status) {
+        const nodes = [];
+        if (status.problems.length) {
+          nodes.push(
+            el(
+              "section",
+              {},
+              el("p", { class: "bad" }, status.problems.join(" ")),
+            ),
+          );
+        }
+        if (!status.running) {
+          nodes.push(el("p", { class: "muted" }, "The plugin is not running."));
+        } else if (!status.networks.length) {
+          nodes.push(
+            el(
+              "p",
+              { class: "muted" },
+              "No network configured. Add one under Server → Plugin Config → Zigbee.",
+            ),
+          );
+        }
+        nodes.push(...status.networks.map(network));
+        if (status.discovered.length) {
+          nodes.push(
+            el(
+              "section",
+              {},
+              el("h2", {}, "espOS coordinators not in use"),
+              ...status.discovered.map((c) =>
+                el(
+                  "p",
+                  {},
+                  `${c.name} — ${c.address}:${c.port}${c.deviceId ? ` (id ${c.deviceId})` : ""}`,
+                ),
+              ),
+            ),
+          );
+        }
+        root.className = "";
+        root.replaceChildren(...nodes);
+      }
+
+      async function refresh() {
+        try {
+          const res = await fetch(`${API}/status`, {
+            credentials: "same-origin",
+          });
+          if (res.status === 401 || res.status === 403) {
+            root.textContent = "Log in to Signal K to see the Zigbee networks.";
+            return;
+          }
+          render(await res.json());
+        } catch (err) {
+          root.textContent = `Status unavailable: ${err}`;
+        }
+      }
+
+      refresh();
+      setInterval(refresh, 5000);
+    </script>
+  </body>
+</html>

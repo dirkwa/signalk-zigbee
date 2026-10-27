@@ -1,0 +1,15 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    uses: SignalK/signalk-server/.github/workflows/plugin-ci.yml@master
+    with:
+      node-versions: '["24"]'
+      enable-armv7: false
+      build-command: "npm run build"
+      format-check-command: "npm run ci-lint"
