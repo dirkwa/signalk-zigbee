@@ -9,8 +9,9 @@
  * is directly reachable on the LAN for pairing.
  */
 
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ContainerConfig } from "signalk-container-helper";
 import {
@@ -24,6 +25,9 @@ export const MOSQUITTO_CONTAINER = "zigbee-mosquitto";
 export const Z2M_CONTAINER_PREFIX = "zigbee2mqtt-";
 /** Where a USB coordinator appears inside its Zigbee2MQTT container. */
 export const COORDINATOR_DEVICE = "/dev/zigbee";
+
+const FRONTEND_TOKEN_FILE = "frontend-token";
+const FRONTEND_TOKEN_BYTES = 16;
 
 const MOSQUITTO_MEMORY = "128m";
 const Z2M_MEMORY = "512m";
@@ -97,6 +101,7 @@ export function z2mEnv(
   settings: Settings,
   dataDir: string,
   serialPort: string,
+  frontendToken: string,
 ): Record<string, string> {
   const env: Record<string, string> = {
     ZIGBEE2MQTT_DATA: dataDir,
@@ -105,6 +110,7 @@ export function z2mEnv(
     ZIGBEE2MQTT_CONFIG_SERIAL_PORT: serialPort,
     ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER: net.adapter,
     ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true",
+    ZIGBEE2MQTT_CONFIG_FRONTEND_AUTH_TOKEN: frontendToken,
     ZIGBEE2MQTT_CONFIG_FRONTEND_PORT: String(net.frontendPort),
     ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED: "false",
   };
@@ -129,6 +135,7 @@ export function z2mContainer(
   tag: string,
   mount: { source: string; containerPath: string },
   access: CoordinatorAccess,
+  frontendToken: string,
 ): ContainerConfig {
   const config: ContainerConfig = {
     image,
@@ -140,6 +147,7 @@ export function z2mContainer(
       settings,
       `${mount.containerPath}/networks/${net.id}`,
       access.serialPort,
+      frontendToken,
     ),
     resources: { memory: Z2M_MEMORY },
   };
@@ -162,12 +170,28 @@ export async function writeMosquittoFiles(
   );
 }
 
+/**
+ * Seeds a new network directory and returns its web interface token.
+ *
+ * Host networking puts the Zigbee2MQTT interface on the LAN, where it would
+ * give anyone full control of the Zigbee network; the token closes that.
+ * It is generated once per network and kept next to Zigbee2MQTT's data.
+ */
 export async function ensureZ2mFiles(
   hostDataDir: string,
   net: NetworkConfig,
-): Promise<void> {
+): Promise<{ frontendToken: string }> {
   const dir = join(hostDataDir, "networks", net.id);
   await mkdir(dir, { recursive: true });
   const file = join(dir, "configuration.yaml");
   if (!existsSync(file)) await writeFile(file, initialZ2mConfig(net));
+
+  const tokenFile = join(dir, FRONTEND_TOKEN_FILE);
+  if (existsSync(tokenFile)) {
+    const stored = (await readFile(tokenFile, "utf8")).trim();
+    if (stored !== "") return { frontendToken: stored };
+  }
+  const frontendToken = randomBytes(FRONTEND_TOKEN_BYTES).toString("hex");
+  await writeFile(tokenFile, `${frontendToken}\n`, { mode: 0o600 });
+  return { frontendToken };
 }

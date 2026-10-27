@@ -78,6 +78,14 @@ describe("flattenExposes", () => {
         ],
       },
       { type: "list", property: "schedule" },
+      {
+        type: "composite",
+        property: "color",
+        features: [
+          { type: "numeric", property: "x", access: 7 },
+          { type: "numeric", property: "y", access: 7 },
+        ],
+      },
     ]);
     expect(leaves.map((l) => l.property)).toEqual(["state_l1", "state_l2"]);
   });

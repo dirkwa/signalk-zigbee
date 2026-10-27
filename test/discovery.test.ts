@@ -94,4 +94,23 @@ describe("CoordinatorDiscovery", () => {
     );
     discovery.stop();
   });
+
+  it("releases the socket when stopped while starting", async () => {
+    let destroyed = 0;
+    let finishImport: (b: BonjourLike) => void = () => {};
+    const discovery = new CoordinatorDiscovery(
+      () => {},
+      () => new Promise<BonjourLike>((resolve) => (finishImport = resolve)),
+    );
+    const starting = discovery.start();
+    discovery.stop();
+    finishImport({
+      find: () => {
+        throw new Error("must not browse after stop");
+      },
+      destroy: () => destroyed++,
+    });
+    await starting;
+    expect(destroyed).toBe(1);
+  });
 });

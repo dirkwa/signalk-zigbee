@@ -65,6 +65,7 @@ describe("zigbee2mqtt", () => {
         devices: [`${USB}:/dev/zigbee`],
         groupAdd: ["dialout"],
       },
+      "tok-main",
     );
     expect(config).toMatchObject({
       networkMode: "host",
@@ -80,6 +81,7 @@ describe("zigbee2mqtt", () => {
       ZIGBEE2MQTT_CONFIG_SERIAL_BAUDRATE: "115200",
       ZIGBEE2MQTT_CONFIG_SERIAL_RTSCTS: "false",
       ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED: "true",
+      ZIGBEE2MQTT_CONFIG_FRONTEND_AUTH_TOKEN: "tok-main",
       ZIGBEE2MQTT_CONFIG_FRONTEND_PORT: "8099",
       ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED: "false",
     });
@@ -93,6 +95,7 @@ describe("zigbee2mqtt", () => {
       "latest",
       MOUNT,
       { serialPort: "tcp://192.168.0.77:6638" },
+      "tok-fly",
     );
     expect(config.devices).toBeUndefined();
     expect(config.env).toMatchObject({
@@ -100,6 +103,7 @@ describe("zigbee2mqtt", () => {
       ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER: "zboss",
       ZIGBEE2MQTT_CONFIG_MQTT_BASE_TOPIC: "zigbee2mqtt-fly",
       ZIGBEE2MQTT_CONFIG_FRONTEND_PORT: "8100",
+      ZIGBEE2MQTT_CONFIG_FRONTEND_AUTH_TOKEN: "tok-fly",
     });
     expect(config.env).not.toHaveProperty("ZIGBEE2MQTT_CONFIG_SERIAL_BAUDRATE");
   });
@@ -114,5 +118,14 @@ describe("zigbee2mqtt", () => {
     writeFileSync(file, "version: 5\nadvanced:\n  network_key: [1, 2, 3]\n");
     await ensureZ2mFiles(dir, usbNet!);
     expect(readFileSync(file, "utf8")).toContain("network_key: [1, 2, 3]");
+  });
+
+  it("generates a web interface token once and keeps it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "skz-"));
+    const first = await ensureZ2mFiles(dir, usbNet!);
+    expect(first.frontendToken).toMatch(/^[0-9a-f]{32}$/);
+    expect(await ensureZ2mFiles(dir, usbNet!)).toEqual(first);
+    const other = await ensureZ2mFiles(dir, esposNet!);
+    expect(other.frontendToken).not.toBe(first.frontendToken);
   });
 });

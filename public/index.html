@@ -131,6 +131,9 @@
     <script>
       const API = "/plugins/signalk-zigbee/api";
       const root = document.getElementById("root");
+      /** Web interface tokens; only an admin session can read them. */
+      let tokens = {};
+      let tokensDenied = false;
 
       function el(tag, attrs, ...children) {
         const node = document.createElement(tag);
@@ -177,7 +180,10 @@
 
       function network(net) {
         const [label, cls] = stateOf(net);
-        const frontend = `${location.protocol}//${location.hostname}:${net.frontendPort}/`;
+        const token = tokens[net.id];
+        const frontend =
+          `${location.protocol}//${location.hostname}:${net.frontendPort}/` +
+          (token ? `?token=${encodeURIComponent(token)}` : "");
         const pair = el("button", {}, "Allow pairing");
         pair.onclick = () => permitJoin(net.id, pair);
         const rows = net.devices.map((d) =>
@@ -298,8 +304,22 @@
         root.replaceChildren(...nodes);
       }
 
+      async function loadTokens() {
+        try {
+          const res = await fetch(`${API}/frontend-tokens`, {
+            credentials: "same-origin",
+          });
+          if (res.ok) tokens = await res.json();
+          else if (res.status === 401 || res.status === 403)
+            tokensDenied = true;
+        } catch {
+          // Keep the last tokens; the links still work without one.
+        }
+      }
+
       async function refresh() {
         try {
+          if (!tokensDenied) await loadTokens();
           const res = await fetch(`${API}/status`, {
             credentials: "same-origin",
           });

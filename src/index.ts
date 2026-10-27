@@ -74,6 +74,12 @@ export default function createPlugin(app: ServerAPI): Plugin {
         res.json(runner.status());
       });
 
+      // GET /plugins/signalk-zigbee/api/frontend-tokens — admin only: each
+      // token unlocks full control of a Zigbee network.
+      pluginRouter.get("/api/frontend-tokens", (_req, res) => {
+        res.json(runner.frontendTokens());
+      });
+
       // POST /plugins/signalk-zigbee/api/networks/:id/permit-join
       // body: { "seconds": 0..254 }, default 254; 0 closes pairing.
       pluginRouter.post("/api/networks/:id/permit-join", (req, res) => {

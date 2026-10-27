@@ -6,10 +6,8 @@
 
 import type { ServerAPI } from "@signalk/server-api";
 import {
-  ContainerHelperError,
   errMsg,
   ManagedContainer,
-  matchContainerInfo,
   probeHostDevice,
   resolveMount,
   startSafely,
@@ -45,8 +43,6 @@ import {
 /** Group owning USB serial nodes on Debian-family hosts. */
 const SERIAL_GROUP = "dialout";
 const MANAGER_TIMEOUT_MS = 120_000;
-/** How long to wait for mDNS before reporting an espOS coordinator missing. */
-const DISCOVERY_GRACE_MS = 10_000;
 
 export type NetworkPhase =
   "starting" | "running" | "waiting" | "error" | "disabled";
@@ -58,6 +54,8 @@ interface NetworkRun {
   container?: ManagedContainer;
   /** The coordinator address the running container was started with. */
   serialPort?: string;
+  /** Token for the Zigbee2MQTT web interface. */
+  frontendToken?: string;
 }
 
 export interface NetworkReport {
@@ -80,16 +78,6 @@ export interface StatusReport {
   networks: NetworkReport[];
   /** espOS coordinators seen on mDNS that no network uses yet. */
   discovered: Coordinator[];
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
 }
 
 export class ZigbeeRunner {
@@ -188,6 +176,16 @@ export class ZigbeeRunner {
     return this.bridge.permitJoin(networkId, seconds);
   }
 
+  /** Web interface tokens of the networks started so far, by network id. */
+  frontendTokens(): Record<string, string> {
+    const tokens: Record<string, string> = {};
+    for (const run of this.runs.values()) {
+      if (run.frontendToken !== undefined)
+        tokens[run.net.id] = run.frontendToken;
+    }
+    return tokens;
+  }
+
   private async bringUp(
     settings: Settings,
     signal: AbortSignal,
@@ -244,22 +242,26 @@ export class ZigbeeRunner {
     this.bridge.start();
 
     await this.stopOrphans(manager, settings);
+    if (signal.aborted) return;
 
     const enabled = settings.networks.filter((net) => net.enabled);
     if (enabled.some((net) => net.coordinator === "espos")) {
       this.discovery = new CoordinatorDiscovery(() => this.onDiscoveryChange());
       await this.discovery.start();
+      if (signal.aborted) {
+        // stop() ran while discovery was starting and found nothing to stop.
+        this.discovery.stop();
+        this.discovery = undefined;
+        return;
+      }
     }
 
     for (const net of enabled.filter((n) => n.coordinator === "usb")) {
       await this.startUsbNetwork(net, signal);
     }
-    const espos = enabled.filter((n) => n.coordinator === "espos");
-    if (espos.length > 0) {
-      // Give mDNS a moment to answer before declaring a coordinator missing.
-      await sleep(DISCOVERY_GRACE_MS, signal);
-      await this.reconcileEspos(signal);
-    }
+    // Coordinators mDNS has not announced yet wait in "waiting"; their
+    // announcement triggers onDiscoveryChange, which starts them.
+    await this.reconcileEspos(signal);
     this.report();
   }
 
@@ -285,7 +287,6 @@ export class ZigbeeRunner {
       if (name === undefined || !name.startsWith(Z2M_CONTAINER_PREFIX))
         continue;
       if (wanted.has(name) || info.state !== "running") continue;
-      if (matchContainerInfo(containers, name) === undefined) continue;
       this.app.debug(`stopping ${name}: its network is no longer configured`);
       await manager.stop(name).catch((err: unknown) => {
         this.app.error(`could not stop ${name}: ${errMsg(err)}`);
@@ -301,13 +302,18 @@ export class ZigbeeRunner {
     try {
       const probe = await probeHostDevice(this.manager!, net.serialPort);
       if (probe?.exists === false) {
-        this.setPhase(net.id, "error", `${net.serialPort} is not plugged in`);
+        this.setPhase(
+          net.id,
+          "error",
+          `${net.serialPort} is not plugged in; plug it in and restart the plugin`,
+        );
         return;
       }
       if (probe?.groups.length) groups = probe.groups;
     } catch (err) {
-      // Older signalk-container: no probe, fall back to the usual group.
-      if (!(err instanceof ContainerHelperError)) throw err;
+      // The probe only refines the group; without it the usual group is
+      // tried (older signalk-container, or the host could not be read).
+      this.app.debug(`probing ${net.serialPort} failed: ${errMsg(err)}`);
     }
     await this.startNetwork(
       net,
@@ -372,7 +378,11 @@ export class ZigbeeRunner {
     const { image, tag } = z2mImage(net);
     this.setPhase(net.id, "starting", `starting Zigbee2MQTT (${image}:${tag})`);
     try {
-      await ensureZ2mFiles(this.app.getDataDirPath(), net);
+      const { frontendToken } = await ensureZ2mFiles(
+        this.app.getDataDirPath(),
+        net,
+      );
+      run.frontendToken = frontendToken;
       run.container ??= new ManagedContainer({
         app: this.app,
         pluginId: PLUGIN_ID,
@@ -382,11 +392,19 @@ export class ZigbeeRunner {
         // Read the current access on every (re)build: an espOS coordinator
         // that moved is restarted through the same container object.
         buildConfig: (t) =>
-          z2mContainer(net, settings, image, t, mount, {
-            serialPort: run.serialPort ?? access.serialPort,
-            devices: access.devices,
-            groupAdd: access.groupAdd,
-          }),
+          z2mContainer(
+            net,
+            settings,
+            image,
+            t,
+            mount,
+            {
+              serialPort: run.serialPort ?? access.serialPort,
+              devices: access.devices,
+              groupAdd: access.groupAdd,
+            },
+            frontendToken,
+          ),
         quiet: true,
       });
       run.serialPort = access.serialPort;

@@ -66,6 +66,15 @@ that network's Zigbee2MQTT when the coordinator announces a new address.
 Coordinators seen on mDNS that no network uses yet are listed in the plugin
 status and in the web app.
 
+### Web interface access
+
+Host networking puts each Zigbee2MQTT web interface on the LAN, where it
+would give anyone full control of that Zigbee network. The plugin therefore
+generates an access token per network, kept in
+`plugin-config-data/signalk-zigbee/networks/<id>/frontend-token`. The links
+in the Zigbee web app carry the token when you are logged in to Signal K as
+an admin; anyone else is asked for it by Zigbee2MQTT.
+
 ### Pairing
 
 Open the **Zigbee** web app, press **Allow pairing** on a network, then put

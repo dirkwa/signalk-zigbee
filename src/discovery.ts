@@ -91,6 +91,7 @@ export class CoordinatorDiscovery {
   private bonjour: BonjourLike | undefined;
   private browser: Browser | undefined;
   private readonly found = new Map<string, Coordinator>();
+  private stopped = false;
 
   constructor(
     private readonly onChange: () => void,
@@ -99,9 +100,15 @@ export class CoordinatorDiscovery {
 
   async start(): Promise<void> {
     if (this.browser !== undefined) return;
+    this.stopped = false;
     const bonjour = this.createBonjour
       ? await this.createBonjour()
       : new (await import("bonjour-service")).Bonjour();
+    if (this.stopped) {
+      // stop() ran while the import was pending.
+      bonjour.destroy();
+      return;
+    }
     this.bonjour = bonjour as BonjourLike;
     const handle = (service: MdnsService) => {
       const coordinator = coordinatorFromService(service, Date.now());
@@ -127,6 +134,7 @@ export class CoordinatorDiscovery {
   }
 
   stop(): void {
+    this.stopped = true;
     try {
       this.browser?.stop();
       this.bonjour?.destroy();

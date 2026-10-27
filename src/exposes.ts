@@ -60,11 +60,17 @@ export interface PathMapping {
 
 const LEAF_TYPES = new Set(["numeric", "binary", "enum", "text"]);
 
-/** Every leaf property, with composite and specific features flattened. */
+/**
+ * Every top-level leaf property. Specific exposes (switch, light, climate …)
+ * are flattened into their features; composites are skipped.
+ */
 export function flattenExposes(exposes: readonly Expose[]): Expose[] {
   const leaves: Expose[] = [];
   const walk = (list: readonly Expose[]) => {
     for (const expose of list) {
+      // A composite's features are nested under its own property in the
+      // state payload ({"color": {"x": …}}), not top-level keys.
+      if (expose.type === "composite") continue;
       if (Array.isArray(expose.features) && expose.features.length > 0) {
         walk(expose.features);
       } else if (
