@@ -8,7 +8,6 @@
   "files": [
     "dist",
     "public",
-    "doc",
     "README.md",
     "LICENSE"
   ],
@@ -43,12 +42,12 @@
   },
   "signalk": {
     "displayName": "Zigbee (Zigbee2MQTT)",
-    "appIcon": "public/icon.svg",
+    "appIcon": "./icon.svg",
     "requires": [
       "signalk-container"
     ],
     "screenshots": [
-      "./doc/screenshots/1_signalk-zigbee.png"
+      "./screenshots/1_signalk-zigbee.png"
     ]
   },
   "engines": {
