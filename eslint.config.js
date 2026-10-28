@@ -20,6 +20,16 @@ export default defineConfig([
     },
   },
 
+  // Plain Node scripts, such as the CI integration check.
+  {
+    files: ["**/*.mjs"],
+    extends: [js.configs.recommended, prettier],
+    languageOptions: {
+      sourceType: "module",
+      globals: globals.node,
+    },
+  },
+
   // Browser-side config panel (webpack + babel-loader, not tsc).
   {
     files: ["src/configpanel/**/*.jsx"],

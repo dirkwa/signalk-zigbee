@@ -5,11 +5,27 @@ on:
     branches: [main]
   pull_request:
 
+# The called workflow runs a node and platform matrix, so each run is a
+# fan-out. One run per ref, superseded ones cancelled; main keys on the
+# commit so a merge's own run is never cancelled by the push that follows it.
+concurrency:
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     uses: SignalK/signalk-server/.github/workflows/plugin-ci.yml@master
     with:
-      node-versions: '["24"]'
-      enable-armv7: false
+      node-versions: '["22", "24"]'
       build-command: "npm run build"
       format-check-command: "npm run ci-lint"
+      # armv7 (Cerbo GX) runs under QEMU and this plugin has no native code,
+      # so the desktop and arm64 matrix already covers what could break.
+      enable-armv7: false
+      # Installs the packed tarball into the latest server with
+      # --ignore-scripts, together with signalk-container from
+      # signalk.requires, enables the plugin and starts the server. The
+      # workflow itself only checks that the plugin is listed;
+      # npm run test:integration then checks that start() got through.
+      enable-signalk-integration: true
+      signalk-server-versions: '["latest"]'
