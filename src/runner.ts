@@ -349,6 +349,7 @@ export class ZigbeeRunner {
       // tried (older signalk-container, or the host could not be read).
       this.app.debug(`probing ${net.serialPort} failed: ${errMsg(err)}`);
     }
+    if (signal.aborted) return;
     const problem = usbCoordinatorProblem(
       net.serialPort,
       onHost,
@@ -389,6 +390,8 @@ export class ZigbeeRunner {
       if (signal.aborted) return;
       if (!run.net.enabled || run.net.coordinator !== "espos") continue;
       const address = await this.discovery?.resolve(run.net.esposAddress);
+      // The lookup can outlive a restart; a newer run owns the phases now.
+      if (signal.aborted) return;
       if (address === undefined) {
         if (run.serialPort === undefined) {
           this.setPhase(
@@ -453,6 +456,7 @@ export class ZigbeeRunner {
       });
       run.serialPort = access.serialPort;
       await run.container.start(tag, { signal });
+      if (signal.aborted) return;
       this.setPhase(net.id, "running");
     } catch (err) {
       if (signal.aborted) return;
