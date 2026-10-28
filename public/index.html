@@ -197,9 +197,37 @@
         return [net.message || net.phase, "warn"];
       }
 
+      /**
+       * Pairing window per network id, as its end on this browser's clock,
+       * so a clock difference to the server does not matter.
+       */
+      const pairingEnds = new Map();
+      /**
+       * Last pairing request error per network id, until the next click or
+       * until Zigbee2MQTT reports pairing open.
+       */
+      const pairingErrors = new Map();
+
+      /** Takes the pairing windows Zigbee2MQTT reports. */
+      function notePairing(status) {
+        pairingEnds.clear();
+        for (const net of status.networks) {
+          if (net.pairingSeconds !== undefined) {
+            pairingEnds.set(net.id, Date.now() + net.pairingSeconds * 1000);
+            // Pairing is open after all, e.g. from Zigbee2MQTT's own page.
+            pairingErrors.delete(net.id);
+          }
+        }
+      }
+
+      function pairingLeft(id) {
+        return ((pairingEnds.get(id) ?? 0) - Date.now()) / 1000;
+      }
+
       /** Opens pairing, or closes it with 0 seconds. */
       async function permitJoin(id, seconds, button) {
         button.disabled = true;
+        pairingErrors.delete(id);
         try {
           const res = await fetch(
             `${API}/networks/${encodeURIComponent(id)}/permit-join`,
@@ -209,16 +237,20 @@
               body: JSON.stringify({ seconds }),
             },
           );
-          if (!res.ok) {
+          if (res.ok) {
+            // Zigbee2MQTT confirmed. Show the window now; the next status
+            // refresh replaces it with the one Zigbee2MQTT reports.
+            if (seconds > 0) pairingEnds.set(id, Date.now() + seconds * 1000);
+            else pairingEnds.delete(id);
+          } else {
             const body = await res.json().catch(() => ({}));
-            button.textContent = body.error || `Failed (${res.status})`;
-            return;
+            pairingErrors.set(id, body.error || `Failed (${res.status})`);
           }
-          // Zigbee2MQTT confirmed; the window comes back with the status.
-          await refresh();
         } catch (err) {
-          button.textContent = String(err);
+          pairingErrors.set(id, String(err));
         }
+        button.disabled = false;
+        updatePairing();
       }
 
       /** "3:52" for 232 seconds. */
@@ -227,13 +259,26 @@
         return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
       }
 
-      // Count the pairing window down between two status refreshes.
-      setInterval(() => {
-        for (const node of document.querySelectorAll("[data-pairing-end]")) {
-          const left = (Number(node.dataset.pairingEnd) - Date.now()) / 1000;
-          node.textContent = `Pairing open, ${clock(left)}`;
+      /**
+       * Brings each network's pairing line and button up to date. Runs every
+       * second, apart from the full render, which a rename in progress holds
+       * back.
+       */
+      function updatePairing() {
+        for (const node of document.querySelectorAll("[data-pairing]")) {
+          const id = node.dataset.pairing;
+          const left = pairingLeft(id);
+          if (node.tagName === "BUTTON") {
+            node.textContent = left > 0 ? "Stop pairing" : "Allow pairing";
+            continue;
+          }
+          const error = pairingErrors.get(id);
+          node.className = error ? "bad" : "ok";
+          node.textContent =
+            error ?? (left > 0 ? `Pairing open, ${clock(left)}` : "");
         }
-      }, 1000);
+      }
+      setInterval(updatePairing, 1000);
 
       function startRename(net, device) {
         editing = {
@@ -351,27 +396,10 @@
         const frontend =
           `${location.protocol}//${location.hostname}:${net.frontendPort}/` +
           (token ? `?token=${encodeURIComponent(token)}` : "");
-        const pairing = net.pairingSeconds !== undefined;
-        const pair = el(
-          "button",
-          {},
-          pairing ? "Stop pairing" : "Allow pairing",
-        );
-        pair.onclick = () => permitJoin(net.id, pairing ? 0 : 254, pair);
-        // The end in this browser's clock, so the countdown ignores any
-        // clock difference to the server.
-        const countdown = pairing
-          ? el(
-              "span",
-              {
-                class: "ok",
-                "data-pairing-end": String(
-                  Date.now() + net.pairingSeconds * 1000,
-                ),
-              },
-              `Pairing open, ${clock(net.pairingSeconds)}`,
-            )
-          : null;
+        const pair = el("button", { "data-pairing": net.id });
+        pair.onclick = () =>
+          permitJoin(net.id, pairingLeft(net.id) > 0 ? 0 : 254, pair);
+        const pairingLine = el("span", { "data-pairing": net.id });
         const rows = net.devices.map((d) =>
           el(
             "tr",
@@ -406,7 +434,7 @@
             el(
               "span",
               { class: "actions" },
-              net.phase === "running" ? countdown : null,
+              net.phase === "running" ? pairingLine : null,
               net.phase === "running" ? pair : null,
               net.phase === "running"
                 ? el(
@@ -492,6 +520,7 @@
         }
         root.className = "";
         root.replaceChildren(...nodes);
+        updatePairing();
       }
 
       async function loadTokens() {
@@ -514,21 +543,26 @@
       }
 
       async function refresh() {
-        // Re-rendering would throw away the name being typed.
-        if (editing) return;
         try {
-          if (!tokensDenied) await loadTokens();
+          if (!tokensDenied && !editing) await loadTokens();
           const res = await fetch(`${API}/status`, {
             credentials: "same-origin",
           });
           if (res.status === 401 || res.status === 403) {
-            root.textContent = "Log in to Signal K to see the Zigbee networks.";
+            if (!editing) {
+              root.textContent =
+                "Log in to Signal K to see the Zigbee networks.";
+            }
             return;
           }
           const status = await res.json();
-          if (!editing) render(status);
+          notePairing(status);
+          // Re-rendering would throw away the name being typed, so a rename
+          // in progress only gets the pairing controls updated.
+          if (editing) updatePairing();
+          else render(status);
         } catch (err) {
-          root.textContent = `Status unavailable: ${err}`;
+          if (!editing) root.textContent = `Status unavailable: ${err}`;
         }
       }
 
