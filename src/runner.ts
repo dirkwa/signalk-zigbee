@@ -95,6 +95,8 @@ export class ZigbeeRunner {
   private runs = new Map<string, NetworkRun>();
   /** Serializes espOS (re)starts triggered by discovery. */
   private esposChain: Promise<void> = Promise.resolve();
+  /** Serializes broker config writes, which cannot be cancelled once begun. */
+  private configWrite: Promise<void> = Promise.resolve();
   private running = false;
 
   constructor(private readonly app: ServerAPI) {}
@@ -104,6 +106,10 @@ export class ZigbeeRunner {
   }
 
   start(settings: Settings): void {
+    // Signal K calls stop() first; abort here too, so an overlapping
+    // start-up can never pass its own checks.
+    this.abort?.abort();
+    this.abort = undefined;
     this.running = true;
     this.settings = settings;
     this.runs = new Map(
@@ -242,12 +248,23 @@ export class ZigbeeRunner {
       containerPath: "/data",
       hostPath: hostDir,
     });
-    this.mount = mount;
     const brokerMount = await resolveMount(manager, {
       containerPath: MOSQUITTO_DATA_MOUNT,
       hostPath: hostDir,
     });
-    await writeMosquittoFiles(hostDir, settings, brokerMount.containerPath);
+    // A newer run owns the broker config and these fields from here on.
+    if (signal.aborted) return;
+    this.mount = mount;
+    // Queued behind an older run's write that was already under way, and
+    // checked again once it is this run's turn.
+    const write = this.configWrite.then(() =>
+      signal.aborted
+        ? undefined
+        : writeMosquittoFiles(hostDir, settings, brokerMount.containerPath),
+    );
+    this.configWrite = write.catch(() => undefined);
+    await write;
+    if (signal.aborted) return;
 
     this.progress("Starting the MQTT broker");
     this.broker = new ManagedContainer({
