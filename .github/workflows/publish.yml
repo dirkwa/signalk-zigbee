@@ -1,81 +1,260 @@
-name: Publish to npm
+# Cuts releases from the history with release-please: a push to main that
+# carries a change users get (the gate below) refreshes a
+# "chore: release x.y.z" pull request carrying the package.json bump, and
+# merging that PR tags the release, creates the GitHub Release and publishes
+# the package to npm. feat bumps minor, fix bumps patch, a `!` bumps major.
+# The release notes are the ones GitHub generates for the pull requests since
+# the last release, each with its author and a link to it, sorted by the
+# labels label-by-title.yml sets (.github/release.yml). No CHANGELOG.md is
+# written.
+#
+# Releasing and publishing share one workflow because a release created with
+# the workflow's own token never starts another workflow, so a tag trigger
+# would never fire, and because npm's trusted publisher names the workflow
+# that runs `npm publish`. It is called publish.yml like in every other
+# plugin repo. To recover a failed publish, re-run its failed jobs, or run
+# this workflow by hand with the release tag once the fix is on main.
+#
+# The tag version must equal package.json's version, and a failure anywhere
+# stops the chain, so npm never gets a version that is not a release.
+#
+# The release PR, though, is opened with a GitHub App's token
+# (the RELEASE_APP_CLIENT_ID variable and the RELEASE_APP_PRIVATE_KEY secret):
+# GitHub holds the checks of a PR opened with the workflow token until a
+# maintainer approves them, while an App's PR runs them at once. So
+# release-please runs twice, the release with the workflow token and the PR
+# with the App's. Without them the PR falls back to the workflow token, and
+# its checks wait for approval.
+name: Publish
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  # With a tag, publishes that existing release again. Without one, runs
+  # release-please, which rewrites the open release PR against the current
+  # configuration -- a change to it is a ci merge, which the gate lets pass
+  # by.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish, e.g. v0.1.1; empty refreshes the release PR
+        required: false
+        type: string
+
+permissions: {}
 
 concurrency:
-  group: publish-${{ github.ref }}
+  group: publish
   cancel-in-progress: false
 
 jobs:
-  release:
+  # GitHub's release notes are never empty -- they always end in a "Full
+  # Changelog" link -- so release-please, which skips a release only when its
+  # notes are empty, would propose one after every merge, a docs or ci change
+  # included. Only a push carrying a change users get goes on to it: feat,
+  # fix, perf or revert, a breaking change whatever its type, a runtime
+  # dependency bump (dependabot scopes those `deps`, dev ones `deps-dev`), a
+  # `Release-As:` footer because it names the release to cut, and the merge
+  # of the release PR itself (pull-request-title-pattern in
+  # release-please-config.json), which is what creates the tag. The subject
+  # is each message's first line. The payload holds at most 2048 commits, so
+  # a push that fills it may hide more and is let through.
+  gate:
+    if: github.event_name == 'push' || inputs.tag == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      releasable: ${{ steps.check.outputs.releasable }}
+    steps:
+      # A manual run carries no commits of its own, so it judges every commit
+      # since the last release instead: it goes on when there is a release PR
+      # to refresh or a merged one still to tag, and stops when only docs or
+      # ci changes are unreleased. With no tag for the manifest's version --
+      # a merged release PR whose tag was never created -- it goes on.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: check
+        env:
+          DISPATCHED: ${{ github.event_name == 'workflow_dispatch' }}
+          MESSAGES: ${{ toJSON(github.event.commits.*.message) }}
+          RELEASABLE: '^((feat|fix|perf|revert)(\([^)]*\))?!?: |[a-z]+(\([^)]*\))?!: |build\(deps\): |Revert |chore: release v?[0-9])'
+        run: |
+          if [ "$DISPATCHED" = true ]; then
+            last="v$(jq -er '."."' .release-please-manifest.json)"
+            if ! git rev-parse -q --verify "refs/tags/$last" > /dev/null; then
+              echo "releasable=true" >> "$GITHUB_OUTPUT"
+              echo "No tag $last; release-please not gated."
+              exit 0
+            fi
+            MESSAGES=$(git log -z --format=%B "$last..HEAD" | jq -Rs 'split("\u0000") | map(select(. != ""))')
+            echo "Judging the $(jq length <<< "$MESSAGES") commits since $last."
+          fi
+          if jq -e --arg re "$RELEASABLE" '(length >= 2048) or ([.[] | (split("\n")[0] | test($re)) or test("\nBREAKING[- ]CHANGE: ") or test("\nRelease-As: "; "i")] | any)' <<< "$MESSAGES" > /dev/null; then
+            echo "releasable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "releasable=false" >> "$GITHUB_OUTPUT"
+            echo "No releasable commit; release-please not run."
+          fi
+
+  release-please:
+    needs: gate
+    if: needs.gate.outputs.releasable == 'true'
+    runs-on: ubuntu-latest
     permissions:
       contents: write
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+      pull-requests: write
+    env:
+      # A flag, because a step's `if` cannot read secrets. Only the flag: the
+      # key itself in the job environment would reach every step.
+      APP_CONFIGURED: >-
+        ${{ vars.RELEASE_APP_CLIENT_ID != '' && secrets.RELEASE_APP_PRIVATE_KEY != '' }}
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Check the tag against package.json
-        run: |
-          version="$(node -p 'require("./package.json").version')"
-          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
-            exit 1
-          fi
-
-      - name: Extract release notes from CHANGELOG.md
-        run: |
-          awk -v ver="# ${GITHUB_REF_NAME}" '
-            $0 == ver { found = 1; next }
-            found && /^# v/ { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::No CHANGELOG.md section found for heading '# ${GITHUB_REF_NAME}'"
-            exit 1
-          fi
-          echo "----- release notes for ${GITHUB_REF_NAME} -----"
-          cat release-notes.md
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        id: rp
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body_path: release-notes.md
-          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      - name: Get the App token for the release PR
+        id: app-token
+        if: env.APP_CONFIGURED == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+  verify:
+    needs: release-please
+    # !cancelled(), because the release is already out by the time the PR step
+    # can fail; whether to publish is answered by release_created alone.
+    if: ${{ !cancelled() && (inputs.tag != '' || needs.release-please.outputs.release_created == 'true') }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The publish jobs build this exact commit rather than re-resolving the
+    # tag, which could have moved since it was checked here.
+    outputs:
+      commit_sha: ${{ steps.verified.outputs.commit_sha }}
+      is_latest: ${{ steps.verified.outputs.is_latest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      # A manual run may name any tag, so it publishes only one that is
+      # already a published release and reachable from main -- the same
+      # thing a release-please run would have published.
+      - name: Manual runs publish only released tags on main
+        if: inputs.tag != ''
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != "false" ]; then
+            echo "::error::${TAG} is not a published release"
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}" FETCH_HEAD; then
+            echo "::error::${TAG} is not on main"
+            exit 1
+          fi
+
+      - name: Tag must match package.json version
+        id: verified
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          tag_version="${TAG#v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag ${TAG} does not match package.json version ${pkg_version}"
+            exit 1
+          fi
+          echo "releasing ${pkg_version}"
+          echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # Only the highest stable tag on main may move `latest`, so
+          # republishing an older release by hand cannot roll users back and
+          # a prerelease or a stray tag off main cannot hold it back.
+          git fetch --no-tags origin main
+          newest=$(git tag -l 'v*' --merged FETCH_HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+          if [ "$TAG" = "$newest" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
 
   publish:
-    needs: release
+    needs: [release-please, verify]
+    # The release environment admits only main. npm's trusted publisher
+    # names it, so a workflow edited on a side branch cannot publish to npm.
+    environment: release
+    # needs on a failed release-please job would skip this even after verify
+    # passed; publish whenever the release exists and verify succeeded.
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
     permissions:
       id-token: write # OIDC trusted publishing
       contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.commit_sha }}
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.x"
           registry-url: "https://registry.npmjs.org"
 
+      # OIDC trusted publishing needs npm >= 11.5; npm 12 breaks
+      # --provenance ("Cannot find module 'sigstore'"). Pin 11.
+      - run: npm install -g npm@^11
+
       - run: npm ci
 
       - name: Publish to npm
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          IS_LATEST: ${{ needs.verify.outputs.is_latest }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          if [[ "$tag" == *alpha* ]]; then
+          version="${TAG#v}"
+          # A manual re-run of a release that already reached npm has
+          # nothing left to publish; npm would reject the version anyway.
+          if [ "$(npm view "signalk-zigbee@${version}" version 2>/dev/null)" = "$version" ]; then
+            echo "${version} is already on npm"
+            exit 0
+          fi
+          if [[ "$TAG" == *alpha* ]]; then
             npm publish --provenance --access public --tag alpha
-          elif [[ "$tag" == *beta* ]]; then
+          elif [[ "$TAG" == *beta* ]]; then
             npm publish --provenance --access public --tag beta
-          elif [[ "$tag" == *rc* ]]; then
+          elif [[ "$TAG" == *rc* ]]; then
             npm publish --provenance --access public --tag rc
-          else
+          elif [ "$IS_LATEST" = "true" ]; then
             npm publish --provenance --access public
+          else
+            npm publish --provenance --access public --tag previous
           fi
