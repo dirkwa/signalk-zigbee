@@ -367,6 +367,28 @@ describe("ZigbeeBridge", () => {
       });
     });
 
+    it("asks again after Zigbee2MQTT refused the options", async () => {
+      makeBridge();
+      const info = {
+        config: { device_options: {}, advanced: { last_seen: "disable" } },
+      };
+      mqtt.deliver(`${BASE}/bridge/info`, info);
+      const { transaction } = JSON.parse(mqtt.published[0]!.message) as {
+        transaction: string;
+      };
+      mqtt.deliver(`${BASE}/bridge/response/options`, {
+        status: "error",
+        error: "nope",
+        transaction,
+      });
+      await Promise.resolve();
+      expect(app.errors.at(-1)).toMatch(
+        /could not enable retained device state: nope/,
+      );
+      mqtt.deliver(`${BASE}/bridge/info`, info);
+      expect(mqtt.published).toHaveLength(2);
+    });
+
     it("leaves Zigbee2MQTT's options alone once they are set", () => {
       makeBridge();
       mqtt.deliver(`${BASE}/bridge/info`, {

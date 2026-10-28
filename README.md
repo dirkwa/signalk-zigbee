@@ -137,9 +137,9 @@ topic `zigbee2mqtt-<id>`.
 
 Two Zigbee2MQTT options are switched on through its options API, because a
 sensor may report only once an hour: `device_options.retain`, so the broker
-keeps each device's last state, and `advanced.last_seen` (ISO 8601), so that
-state keeps the time it was reported. After a Signal K restart the paths are
-filled again right away, with their original timestamps.
+keeps each device's last state, and `advanced.last_seen` (ISO 8601), the
+time of the device's last message. After a Signal K restart the paths are
+filled again right away, stamped with that time rather than the restart.
 
 Disabling the plugin stops the containers; re-enabling starts them again
 without a pull. Removing or disabling a network stops its container.

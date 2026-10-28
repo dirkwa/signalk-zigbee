@@ -492,6 +492,9 @@ export class ZigbeeBridge {
           `${net.id}: Zigbee2MQTT now retains device state with last_seen`,
         ),
       (err: Error) => {
+        // Let the next bridge/info try again. It is retained, so an MQTT
+        // reconnect or a Zigbee2MQTT restart delivers one.
+        net.optionsRequested = false;
         if (this.client === undefined) return;
         this.app.error(
           `${net.id}: could not enable retained device state: ${err.message}`,
