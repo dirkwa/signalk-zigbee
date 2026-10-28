@@ -1,6 +1,6 @@
 {
   "name": "signalk-zigbee",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "Zigbee sensors and switches in Signal K: runs Zigbee2MQTT and Mosquitto as managed containers and maps every device to Signal K paths automatically, with PUT support for writable values.",
   "type": "module",
   "main": "dist/index.js",
