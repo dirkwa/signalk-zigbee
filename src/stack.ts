@@ -22,6 +22,15 @@ import {
 } from "./config.js";
 
 export const MOSQUITTO_CONTAINER = "zigbee-mosquitto";
+/**
+ * The Mosquitto image declares VOLUMEs at these paths. Left alone, the
+ * runtime attaches anonymous volumes there, which signalk-container counts
+ * as volume drift and recreates the broker on every start. Binding the
+ * plugin's data directory over both keeps the live mounts equal to the
+ * requested ones.
+ */
+export const MOSQUITTO_DATA_MOUNT = "/mosquitto/data";
+const MOSQUITTO_LOG_MOUNT = "/mosquitto/log";
 export const Z2M_CONTAINER_PREFIX = "zigbee2mqtt-";
 /** Where a USB coordinator appears inside its Zigbee2MQTT container. */
 export const COORDINATOR_DEVICE = "/dev/zigbee";
@@ -68,7 +77,10 @@ export function mosquittoContainer(
     image: MOSQUITTO_IMAGE,
     tag,
     networkMode: "host",
-    volumes: { "/data": mount.source },
+    volumes: {
+      [MOSQUITTO_DATA_MOUNT]: mount.source,
+      [MOSQUITTO_LOG_MOUNT]: mount.source,
+    },
     command: ["mosquitto", "-c", `${dir}/mosquitto.conf`],
     resources: { memory: MOSQUITTO_MEMORY },
   };

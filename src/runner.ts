@@ -32,6 +32,7 @@ import {
   ensureZ2mFiles,
   mosquittoContainer,
   MOSQUITTO_CONTAINER,
+  MOSQUITTO_DATA_MOUNT,
   mqttServer,
   writeMosquittoFiles,
   z2mContainer,
@@ -215,7 +216,11 @@ export class ZigbeeRunner {
       hostPath: hostDir,
     });
     this.mount = mount;
-    await writeMosquittoFiles(hostDir, settings, mount.containerPath);
+    const brokerMount = await resolveMount(manager, {
+      containerPath: MOSQUITTO_DATA_MOUNT,
+      hostPath: hostDir,
+    });
+    await writeMosquittoFiles(hostDir, settings, brokerMount.containerPath);
 
     this.app.setPluginStatus("Starting the MQTT broker");
     this.broker = new ManagedContainer({
@@ -224,7 +229,7 @@ export class ZigbeeRunner {
       name: MOSQUITTO_CONTAINER,
       image: MOSQUITTO_IMAGE,
       defaultTag: settings.mosquittoTag,
-      buildConfig: (tag) => mosquittoContainer(settings, tag, mount),
+      buildConfig: (tag) => mosquittoContainer(settings, tag, brokerMount),
       quiet: true,
     });
     await this.broker.start(settings.mosquittoTag, { signal });

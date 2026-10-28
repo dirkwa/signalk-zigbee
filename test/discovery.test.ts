@@ -114,6 +114,27 @@ describe("CoordinatorDiscovery", () => {
     expect(destroyed).toBe(1);
   });
 
+  it("shares one start between concurrent callers", async () => {
+    let created = 0;
+    let browsing = 0;
+    const discovery = new CoordinatorDiscovery(
+      () => {},
+      async () => {
+        created++;
+        return {
+          find: () => {
+            browsing++;
+            return new FakeBrowser();
+          },
+          destroy() {},
+        };
+      },
+    );
+    await Promise.all([discovery.start(), discovery.start()]);
+    expect([created, browsing]).toEqual([1, 1]);
+    discovery.stop();
+  });
+
   it("does not revive a start that a stop and restart overtook", async () => {
     const pending: ((b: BonjourLike) => void)[] = [];
     let browsing = 0;

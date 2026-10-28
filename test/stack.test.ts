@@ -34,12 +34,16 @@ describe("mosquitto", () => {
   });
 
   it("runs on the host network with the plugin's config", () => {
-    expect(mosquittoContainer(settings, "2.0.22", MOUNT)).toMatchObject({
+    const brokerMount = { ...MOUNT, containerPath: "/mosquitto/data" };
+    expect(mosquittoContainer(settings, "2.0.22", brokerMount)).toMatchObject({
       image: "eclipse-mosquitto",
       tag: "2.0.22",
       networkMode: "host",
-      volumes: { "/data": MOUNT.source },
-      command: ["mosquitto", "-c", "/data/mosquitto/mosquitto.conf"],
+      volumes: {
+        "/mosquitto/data": MOUNT.source,
+        "/mosquitto/log": MOUNT.source,
+      },
+      command: ["mosquitto", "-c", "/mosquitto/data/mosquitto/mosquitto.conf"],
     });
   });
 
