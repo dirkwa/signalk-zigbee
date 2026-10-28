@@ -96,7 +96,10 @@ const TRANSLITERATIONS: Record<string, string> = {
   ß: "ss",
 };
 
-/** "Kühlschrank links" → "kuehlschrankLinks"; a single safe path segment. */
+/**
+ * "Kühlschrank links" → "kuehlschrankLinks"; a single safe path segment.
+ * A word in capitals counts as a plain word: "TEMP_internal" → "tempInternal".
+ */
 export function camelSegment(text: string): string {
   const ascii = text
     .replace(/[äöüÄÖÜß]/g, (ch) => TRANSLITERATIONS[ch] ?? ch)
@@ -104,6 +107,7 @@ export function camelSegment(text: string): string {
     .replace(/[̀-ͯ]/g, "");
   const words = ascii.split(/[^A-Za-z0-9]+/).filter((word) => word !== "");
   const camel = words
+    .map((word) => (word === word.toUpperCase() ? word.toLowerCase() : word))
     .map((word, index) =>
       index === 0
         ? word.charAt(0).toLowerCase() + word.slice(1)
