@@ -35,7 +35,8 @@ network; a device is paired to one of them. Networks are not merged.
 - For a USB coordinator in a containerized Signal K: the stick must also be
   passed to the Signal K container, so signalk-container can verify it.
   With the universal installer, plug the stick in and run
-  `signalk hardware rescan`.
+  `signalk hardware rescan`. If that step is missing, the network shows an
+  error saying so instead of starting Zigbee2MQTT without its coordinator.
 
 ## Configuration
 

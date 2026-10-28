@@ -8,6 +8,7 @@ import {
   initialZ2mConfig,
   mosquittoConf,
   mosquittoContainer,
+  usbCoordinatorProblem,
   writeMosquittoFiles,
   z2mContainer,
 } from "../src/stack.js";
@@ -133,5 +134,33 @@ describe("zigbee2mqtt", () => {
     expect(await ensureZ2mFiles(dir, usbNet!)).toEqual(first);
     const other = await ensureZ2mFiles(dir, esposNet!);
     expect(other.frontendToken).not.toBe(first.frontendToken);
+  });
+});
+
+describe("usbCoordinatorProblem", () => {
+  it("accepts a stick Signal K can see", () => {
+    expect(usbCoordinatorProblem(USB, true, true)).toBeUndefined();
+    // The host probe could not run, but the stick is right here.
+    expect(usbCoordinatorProblem(USB, undefined, true)).toBeUndefined();
+  });
+
+  it("reports a stick that is not plugged in", () => {
+    expect(usbCoordinatorProblem(USB, false, false)).toMatch(
+      /is not plugged in/,
+    );
+  });
+
+  it("points at the hardware rescan when only the host sees the stick", () => {
+    const problem = usbCoordinatorProblem(USB, true, false);
+    expect(problem).toMatch(
+      /plugged in, but the Signal K container cannot see it/,
+    );
+    expect(problem).toContain("signalk hardware rescan");
+  });
+
+  it("names both causes when the host could not be probed", () => {
+    const problem = usbCoordinatorProblem(USB, undefined, false);
+    expect(problem).toMatch(/unplugged, or not passed to its container/);
+    expect(problem).toContain("signalk hardware rescan");
   });
 });

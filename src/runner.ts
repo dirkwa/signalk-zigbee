@@ -4,6 +4,7 @@
  * configured.
  */
 
+import { existsSync } from "node:fs";
 import type { ServerAPI } from "@signalk/server-api";
 import {
   errMsg,
@@ -38,6 +39,7 @@ import {
   z2mContainer,
   z2mContainerName,
   Z2M_CONTAINER_PREFIX,
+  usbCoordinatorProblem,
   type CoordinatorAccess,
 } from "./stack.js";
 
@@ -337,21 +339,25 @@ export class ZigbeeRunner {
     signal: AbortSignal,
   ): Promise<void> {
     let groups = [SERIAL_GROUP];
+    let onHost: boolean | undefined;
     try {
       const probe = await probeHostDevice(this.manager!, net.serialPort);
-      if (probe?.exists === false) {
-        this.setPhase(
-          net.id,
-          "error",
-          `${net.serialPort} is not plugged in; plug it in and restart the plugin`,
-        );
-        return;
-      }
+      onHost = probe?.exists;
       if (probe?.groups.length) groups = probe.groups;
     } catch (err) {
       // The probe only refines the group; without it the usual group is
       // tried (older signalk-container, or the host could not be read).
       this.app.debug(`probing ${net.serialPort} failed: ${errMsg(err)}`);
+    }
+    const problem = usbCoordinatorProblem(
+      net.serialPort,
+      onHost,
+      existsSync(net.serialPort),
+    );
+    if (problem !== undefined) {
+      this.app.error(`${net.id}: ${problem}`);
+      this.setPhase(net.id, "error", problem);
+      return;
     }
     await this.startNetwork(
       net,
