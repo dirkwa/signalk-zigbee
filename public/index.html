@@ -121,6 +121,30 @@
         font-size: 0.9em;
         word-break: break-all;
       }
+      .rename {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .rename input {
+        font: inherit;
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 3px 8px;
+        min-width: 0;
+        flex: 1 1 10em;
+      }
+      .link {
+        border: none;
+        padding: 0;
+        font-size: 0.9em;
+      }
+      .notice {
+        margin: 10px 0 0;
+      }
     </style>
   </head>
   <body>
@@ -134,11 +158,19 @@
       /** Web interface tokens; only an admin session can read them. */
       let tokens = {};
       let tokensDenied = false;
+      /** Reading the tokens worked, so this session may rename devices. */
+      let isAdmin = false;
+      let lastStatus = null;
+      /** { network, ieee, draft, error, busy } while a rename is open. */
+      let editing = null;
+      /** { network, text } after a rename. */
+      let notice = null;
 
       function el(tag, attrs, ...children) {
         const node = document.createElement(tag);
         for (const [key, value] of Object.entries(attrs || {})) {
-          if (key === "onclick") node.onclick = value;
+          if (key.startsWith("on") || key === "value" || key === "disabled")
+            node[key] = value;
           else node.setAttribute(key, value);
         }
         for (const child of children) {
@@ -178,6 +210,116 @@
         }
       }
 
+      function startRename(net, device) {
+        editing = {
+          network: net.id,
+          ieee: device.ieeeAddress,
+          draft: device.friendlyName,
+          error: "",
+          busy: false,
+        };
+        render(lastStatus);
+        const input = root.querySelector(".rename input");
+        input?.focus();
+        input?.select();
+      }
+
+      function cancelRename() {
+        editing = null;
+        refresh();
+      }
+
+      async function saveRename() {
+        const edit = editing;
+        if (!edit || edit.busy) return;
+        edit.busy = true;
+        edit.error = "";
+        render(lastStatus);
+        try {
+          const res = await fetch(
+            `${API}/networks/${encodeURIComponent(edit.network)}` +
+              `/devices/${encodeURIComponent(edit.ieee)}/rename`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: edit.draft }),
+            },
+          );
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            editing = null;
+            notice = {
+              network: edit.network,
+              text:
+                `Renamed to “${body.friendlyName}”, Signal K path ${body.basePath}. ` +
+                "Values under an old path stay in the Data Browser until Signal K restarts.",
+            };
+            await refresh();
+            return;
+          }
+          edit.error = body.error || `Failed (${res.status})`;
+        } catch (err) {
+          edit.error = String(err);
+        }
+        edit.busy = false;
+        render(lastStatus);
+      }
+
+      function deviceCell(net, d) {
+        if (editing?.network === net.id && editing.ieee === d.ieeeAddress) {
+          const input = el("input", {
+            value: editing.draft,
+            maxlength: "64",
+            "aria-label": "New name",
+            disabled: editing.busy,
+            oninput: (e) => (editing.draft = e.target.value),
+            onkeydown: (e) => {
+              if (e.key === "Enter") saveRename();
+              if (e.key === "Escape") cancelRename();
+            },
+          });
+          return el(
+            "td",
+            {},
+            el(
+              "div",
+              { class: "rename" },
+              input,
+              el(
+                "button",
+                { onclick: saveRename, disabled: editing.busy },
+                "Save",
+              ),
+              el(
+                "button",
+                { onclick: cancelRename, disabled: editing.busy },
+                "Cancel",
+              ),
+            ),
+            el("div", { class: "muted" }, d.ieeeAddress),
+            editing.error ? el("div", { class: "bad" }, editing.error) : null,
+          );
+        }
+        return el(
+          "td",
+          {},
+          d.friendlyName,
+          isAdmin && !editing
+            ? el(
+                "span",
+                {},
+                " ",
+                el(
+                  "button",
+                  { class: "link", onclick: () => startRename(net, d) },
+                  "Rename",
+                ),
+              )
+            : null,
+          el("div", { class: "muted" }, d.ieeeAddress),
+        );
+      }
+
       function network(net) {
         const [label, cls] = stateOf(net);
         const token = tokens[net.id];
@@ -190,12 +332,7 @@
           el(
             "tr",
             {},
-            el(
-              "td",
-              {},
-              d.friendlyName,
-              el("div", { class: "muted" }, d.ieeeAddress),
-            ),
+            deviceCell(net, d),
             el("td", {}, [d.vendor, d.model].filter(Boolean).join(" ")),
             el(
               "td",
@@ -235,6 +372,9 @@
                 : null,
             ),
           ),
+          notice?.network === net.id
+            ? el("p", { class: "notice ok" }, notice.text)
+            : null,
           rows.length
             ? el(
                 "div",
@@ -262,6 +402,8 @@
       }
 
       function render(status) {
+        if (!status) return;
+        lastStatus = status;
         const nodes = [];
         if (status.problems.length) {
           nodes.push(
@@ -311,10 +453,12 @@
           });
           if (res.ok) {
             tokens = await res.json();
+            isAdmin = true;
           } else if (res.status === 401 || res.status === 403) {
             // Not (or no longer) an admin: drop tokens an earlier session saw.
             tokens = {};
             tokensDenied = true;
+            isAdmin = false;
           }
         } catch {
           // Keep the last tokens; the links still work without one.
@@ -322,6 +466,8 @@
       }
 
       async function refresh() {
+        // Re-rendering would throw away the name being typed.
+        if (editing) return;
         try {
           if (!tokensDenied) await loadTokens();
           const res = await fetch(`${API}/status`, {
@@ -331,7 +477,8 @@
             root.textContent = "Log in to Signal K to see the Zigbee networks.";
             return;
           }
-          render(await res.json());
+          const status = await res.json();
+          if (!editing) render(status);
         } catch (err) {
           root.textContent = `Status unavailable: ${err}`;
         }

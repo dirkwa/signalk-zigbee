@@ -79,14 +79,16 @@ an admin; anyone else is asked for it by Zigbee2MQTT.
 
 Open the **Zigbee** web app, press **Allow pairing** on a network, then put
 the device into pairing mode (on most Sonoff sensors: hold the button for
-five seconds). The full Zigbee2MQTT interface is linked from the same page,
-for renaming devices, OTA updates and the network map.
+five seconds). A new device is named after its IEEE address; admins can
+**Rename** it right in the device list. The full Zigbee2MQTT interface is
+linked from the same page, for OTA updates and the network map.
 
 ## Signal K paths
 
 By default a device lands under `zigbee.<network>.<name>`, where `<name>` is
-its Zigbee2MQTT friendly name in camelCase. Rename the device in Zigbee2MQTT
-and the paths follow. The template is configurable (`{network}`, `{name}`,
+its Zigbee2MQTT friendly name in camelCase. Rename the device (in the Zigbee
+web app or in Zigbee2MQTT) and the paths follow; values under the old path
+stay in the Data Browser until Signal K restarts. The template is configurable (`{network}`, `{name}`,
 `{ieee}`), and **Per-device paths** gives a single device a meaningful place
 by its IEEE address, e.g. `environment.inside.saloon`.
 

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ActionResult } from "@signalk/server-api";
 import {
+  BridgeRequestError,
   ZigbeeBridge,
   type BridgeApp,
   type MqttClientLike,
@@ -118,6 +119,7 @@ describe("ZigbeeBridge", () => {
       basePath: string;
       enabled: boolean;
     }[] = [],
+    requestTimeoutMs?: number,
   ) {
     bridge = new ZigbeeBridge(app, {
       url: "mqtt://127.0.0.1:1883",
@@ -125,6 +127,7 @@ describe("ZigbeeBridge", () => {
       pathTemplate: "zigbee.{network}.{name}",
       overrides,
       connect: () => mqtt,
+      requestTimeoutMs,
     });
     bridge.start();
     mqtt.emit("connect");
@@ -295,5 +298,129 @@ describe("ZigbeeBridge", () => {
     await expect(bridge.permitJoin("nope", 10)).rejects.toThrow(
       /unknown network/,
     );
+  });
+
+  describe("renameDevice", () => {
+    const IEEE = "0x00124b0029fd1234";
+
+    /** Answers the last bridge request the way Zigbee2MQTT would. */
+    function respond(body: Record<string, unknown>) {
+      const request = mqtt.published.at(-1)!;
+      const name = request.topic.slice(`${BASE}/bridge/request/`.length);
+      const { transaction } = JSON.parse(request.message) as {
+        transaction: string;
+      };
+      mqtt.deliver(`${BASE}/bridge/response/${name}`, {
+        ...body,
+        transaction,
+      });
+    }
+
+    function failure(promise: Promise<unknown>) {
+      return promise.then(
+        () => {
+          throw new Error("expected a rejection");
+        },
+        (err: unknown) => err as BridgeRequestError,
+      );
+    }
+
+    it("renames through the bridge request API and returns the new path", async () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor(IEEE, IEEE)]);
+      const renamed = bridge.renameDevice("main", IEEE, "  Salon Klima ");
+      await Promise.resolve();
+      const request = mqtt.published.at(-1)!;
+      expect(request.topic).toBe(`${BASE}/bridge/request/device/rename`);
+      expect(JSON.parse(request.message)).toMatchObject({
+        from: IEEE,
+        to: "Salon Klima",
+      });
+      respond({ status: "ok", data: { from: IEEE, to: "Salon Klima" } });
+      await expect(renamed).resolves.toEqual({
+        friendlyName: "Salon Klima",
+        basePath: "zigbee.main.salonKlima",
+      });
+    });
+
+    it("passes Zigbee2MQTT's refusal on", async () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      const renamed = failure(bridge.renameDevice("main", IEEE, "a/1"));
+      await Promise.resolve();
+      respond({
+        status: "error",
+        error: "friendly_name is not allowed to end with /DIGIT",
+      });
+      const err = await renamed;
+      expect(err.message).toMatch(/not allowed/);
+      expect(err.statusCode).toBe(400);
+    });
+
+    it("ignores responses to other transactions and times out", async () => {
+      makeBridge([], 20);
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      const renamed = failure(bridge.renameDevice("main", IEEE, "Cockpit"));
+      mqtt.deliver(`${BASE}/bridge/response/device/rename`, {
+        status: "ok",
+        transaction: "someone-else",
+      });
+      const err = await renamed;
+      expect(err.statusCode).toBe(504);
+    });
+
+    it("refuses a name whose path another device already uses", async () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/devices`, [
+        sensor("Salon"),
+        sensor("Cockpit", "0x00124b0029fd9999"),
+      ]);
+      const err = await failure(bridge.renameDevice("main", IEEE, "cockpit"));
+      expect(err.statusCode).toBe(409);
+      expect(err.message).toContain("zigbee.main.cockpit");
+      expect(mqtt.published).toEqual([]);
+    });
+
+    it("rejects unknown devices and empty names without asking Zigbee2MQTT", async () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      expect(
+        (await failure(bridge.renameDevice("nope", IEEE, "x"))).statusCode,
+      ).toBe(404);
+      expect(
+        (await failure(bridge.renameDevice("main", "0x1", "x"))).statusCode,
+      ).toBe(404);
+      expect(
+        (await failure(bridge.renameDevice("main", IEEE, "  "))).statusCode,
+      ).toBe(400);
+      expect(mqtt.published).toEqual([]);
+    });
+
+    it("keeps a configured base path and skips a rename to the same name", async () => {
+      makeBridge([
+        {
+          ieeeAddress: IEEE,
+          basePath: "environment.inside.salon",
+          enabled: true,
+        },
+      ]);
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      await expect(
+        bridge.renameDevice("main", IEEE.toUpperCase(), "Salon"),
+      ).resolves.toEqual({
+        friendlyName: "Salon",
+        basePath: "environment.inside.salon",
+      });
+      expect(mqtt.published).toEqual([]);
+    });
+
+    it("fails pending requests on stop", async () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      const renamed = failure(bridge.renameDevice("main", IEEE, "Cockpit"));
+      await Promise.resolve();
+      await bridge.stop();
+      expect((await renamed).message).toBe("stopped");
+    });
   });
 });

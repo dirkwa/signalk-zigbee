@@ -15,6 +15,7 @@ import {
   PLUGIN_ID,
   UI_SCHEMA,
 } from "./config.js";
+import { BridgeRequestError } from "./bridge.js";
 import { ZigbeeRunner } from "./runner.js";
 
 interface RequestLike {
@@ -38,6 +39,7 @@ interface PluginRouter {
 
 /** Zigbee2MQTT's longest permit-join window. */
 const MAX_PERMIT_JOIN_S = 254;
+const MAX_NAME_LENGTH = 64;
 
 export default function createPlugin(app: ServerAPI): Plugin {
   // Kept for the process lifetime: registerWithRouter runs once, even while
@@ -98,6 +100,40 @@ export default function createPlugin(app: ServerAPI): Plugin {
           (err: unknown) => res.status(502).json({ error: errMsg(err) }),
         );
       });
+
+      // POST /plugins/signalk-zigbee/api/networks/:id/devices/:ieee/rename
+      // body: { "name": "Salon" } — renames the device in Zigbee2MQTT.
+      pluginRouter.post(
+        "/api/networks/:id/devices/:ieee/rename",
+        (req, res) => {
+          if (!runner.isRunning) {
+            res.status(503).json({ error: `${PLUGIN_ID} is not running` });
+            return;
+          }
+          const name = (req.body as { name?: unknown } | undefined)?.name;
+          if (
+            typeof name !== "string" ||
+            name.trim() === "" ||
+            name.length > MAX_NAME_LENGTH
+          ) {
+            res.status(400).json({
+              error: `name must be 1 to ${MAX_NAME_LENGTH} characters`,
+            });
+            return;
+          }
+          runner
+            .renameDevice(req.params.id ?? "", req.params.ieee ?? "", name)
+            .then(
+              (result) => res.json(result),
+              (err: unknown) =>
+                res
+                  .status(
+                    err instanceof BridgeRequestError ? err.statusCode : 502,
+                  )
+                  .json({ error: errMsg(err) }),
+            );
+        },
+      );
     },
   };
 

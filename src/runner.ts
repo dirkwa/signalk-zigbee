@@ -187,6 +187,17 @@ export class ZigbeeRunner {
     return this.bridge.permitJoin(networkId, seconds);
   }
 
+  renameDevice(
+    networkId: string,
+    ieeeAddress: string,
+    name: string,
+  ): Promise<{ friendlyName: string; basePath: string }> {
+    if (this.bridge === undefined) {
+      return Promise.reject(new Error("not started"));
+    }
+    return this.bridge.renameDevice(networkId, ieeeAddress, name);
+  }
+
   /** Web interface tokens of the networks started so far, by network id. */
   frontendTokens(): Record<string, string> {
     const tokens: Record<string, string> = {};

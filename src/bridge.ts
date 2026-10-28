@@ -69,6 +69,19 @@ export interface BridgeOptions {
   connect?: MqttConnect;
   /** Called whenever the reportable state changes. */
   onChange?: () => void;
+  /** How long to wait for Zigbee2MQTT to answer a bridge request. */
+  requestTimeoutMs?: number;
+}
+
+/** A refused request, with the HTTP status that describes it. */
+export class BridgeRequestError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "BridgeRequestError";
+  }
 }
 
 export interface DeviceStatus {
@@ -109,8 +122,17 @@ interface PathTarget {
   mapping: PathMapping;
 }
 
+interface PendingRequest {
+  resolve(data: unknown): void;
+  reject(err: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 const SELF = "vessels.self";
 const RECONNECT_MS = 5000;
+const REQUEST_TIMEOUT_MS = 10_000;
+/** Zigbee2MQTT echoes this field in the matching bridge/response. */
+const TRANSACTION_BYTES = 6;
 const DEVICE_TOPIC_SUFFIXES = ["/set", "/get", "/availability"];
 
 function jsonPayload(payload: Buffer): unknown {
@@ -128,6 +150,8 @@ export class ZigbeeBridge {
   private readonly paths = new Map<string, PathTarget>();
   /** Paths a PUT handler was registered for; the server cannot unregister. */
   private readonly putPaths = new Set<string>();
+  /** Bridge requests awaiting their response, by transaction id. */
+  private readonly pending = new Map<string, PendingRequest>();
   private connected = false;
 
   constructor(
@@ -181,6 +205,11 @@ export class ZigbeeBridge {
     const client = this.client;
     this.client = undefined;
     this.connected = false;
+    for (const [transaction, request] of this.pending) {
+      clearTimeout(request.timer);
+      request.reject(new Error("stopped"));
+      this.pending.delete(transaction);
+    }
     if (client === undefined) return;
     await new Promise<void>((resolve) => client.end(true, resolve));
   }
@@ -209,13 +238,119 @@ export class ZigbeeBridge {
 
   /** Open the network for pairing; 0 closes it again. */
   permitJoin(networkId: string, seconds: number): Promise<void> {
-    const net = [...this.networks.values()].find((n) => n.id === networkId);
+    const net = this.findNetwork(networkId);
     if (net === undefined) {
       return Promise.reject(new Error(`unknown network "${networkId}"`));
     }
     return this.publish(`${net.baseTopic}/bridge/request/permit_join`, {
       time: seconds,
     });
+  }
+
+  /**
+   * Rename a device in Zigbee2MQTT. With the default path template the
+   * Signal K path follows the new name; a configured base path stays.
+   * Resolves once Zigbee2MQTT confirmed the rename.
+   */
+  async renameDevice(
+    networkId: string,
+    ieeeAddress: string,
+    name: string,
+  ): Promise<{ friendlyName: string; basePath: string }> {
+    const net = this.findNetwork(networkId);
+    if (net === undefined) {
+      throw new BridgeRequestError(`unknown network "${networkId}"`, 404);
+    }
+    const ieee = ieeeAddress.toLowerCase();
+    const entry = [...net.devices.values()].find(
+      (e) => e.device.ieee_address.toLowerCase() === ieee,
+    );
+    if (entry === undefined) {
+      throw new BridgeRequestError(
+        `no device ${ieeeAddress} in ${net.id}`,
+        404,
+      );
+    }
+    const to = name.trim();
+    if (to === "") throw new BridgeRequestError("the name is empty", 400);
+
+    const { basePath } = this.basePathFor(net, {
+      ...entry.device,
+      friendly_name: to,
+    });
+    if (to === entry.device.friendly_name)
+      return { friendlyName: to, basePath };
+    for (const other of this.networks.values()) {
+      for (const e of other.devices.values()) {
+        if (e !== entry && e.enabled && e.basePath === basePath) {
+          throw new BridgeRequestError(
+            `${basePath} is already used by ${e.device.friendly_name}`,
+            409,
+          );
+        }
+      }
+    }
+
+    await this.request(net, "device/rename", {
+      from: entry.device.ieee_address,
+      to,
+    });
+    return { friendlyName: to, basePath };
+  }
+
+  private findNetwork(networkId: string): NetworkState | undefined {
+    return [...this.networks.values()].find((n) => n.id === networkId);
+  }
+
+  /** A bridge request whose bridge/response decides the outcome. */
+  private request(
+    net: NetworkState,
+    name: string,
+    body: object,
+  ): Promise<unknown> {
+    const transaction = randomBytes(TRANSACTION_BYTES).toString("hex");
+    const timeoutMs = this.options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(transaction);
+        reject(
+          new BridgeRequestError(`Zigbee2MQTT did not answer ${name}`, 504),
+        );
+      }, timeoutMs);
+      this.pending.set(transaction, { resolve, reject, timer });
+      this.publish(`${net.baseTopic}/bridge/request/${name}`, {
+        ...body,
+        transaction,
+      }).catch((err: Error) => {
+        clearTimeout(timer);
+        this.pending.delete(transaction);
+        reject(err);
+      });
+    });
+  }
+
+  private onResponse(payload: Buffer): void {
+    const body = jsonPayload(payload) as
+      | {
+          status?: unknown;
+          data?: unknown;
+          error?: unknown;
+          transaction?: unknown;
+        }
+      | undefined;
+    if (typeof body !== "object" || body === null) return;
+    if (typeof body.transaction !== "string") return;
+    const request = this.pending.get(body.transaction);
+    if (request === undefined) return;
+    this.pending.delete(body.transaction);
+    clearTimeout(request.timer);
+    if (body.status === "ok") {
+      request.resolve(body.data);
+    } else {
+      const message =
+        typeof body.error === "string" ? body.error : "request failed";
+      request.reject(new BridgeRequestError(message, 400));
+    }
   }
 
   private publish(topic: string, body: object): Promise<void> {
@@ -252,6 +387,10 @@ export class ZigbeeBridge {
       if (Array.isArray(body)) this.updateDevices(net, body as Z2mDevice[]);
       return;
     }
+    if (rest.startsWith("bridge/response/")) {
+      this.onResponse(payload);
+      return;
+    }
     if (rest.startsWith("bridge/")) return;
     if (DEVICE_TOPIC_SUFFIXES.some((suffix) => rest.endsWith(suffix))) return;
 
@@ -264,7 +403,7 @@ export class ZigbeeBridge {
 
   private basePathFor(
     net: NetworkState,
-    device: Z2mDevice,
+    device: Pick<Z2mDevice, "friendly_name" | "ieee_address">,
   ): {
     basePath: string;
     enabled: boolean;
