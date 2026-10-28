@@ -8,6 +8,7 @@
   "files": [
     "dist",
     "public",
+    "doc",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -47,6 +48,9 @@
     "appIcon": "public/icon.svg",
     "requires": [
       "signalk-container"
+    ],
+    "screenshots": [
+      "./doc/screenshots/1_signalk-zigbee.png"
     ]
   },
   "engines": {
