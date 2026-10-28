@@ -105,7 +105,10 @@ export default function createPlugin(app: ServerAPI): Plugin {
             : MAX_PERMIT_JOIN_S;
         runner.permitJoin(req.params.id ?? "", seconds).then(
           () => res.json({ network: req.params.id, seconds }),
-          (err: unknown) => res.status(502).json({ error: errMsg(err) }),
+          (err: unknown) =>
+            res
+              .status(err instanceof BridgeRequestError ? err.statusCode : 502)
+              .json({ error: errMsg(err) }),
         );
       });
 

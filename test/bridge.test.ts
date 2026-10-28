@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { ActionResult } from "@signalk/server-api";
 import {
   BridgeRequestError,
+  pairingEnd,
+  secondsUntil,
   ZigbeeBridge,
   type BridgeApp,
   type MqttClientLike,
@@ -291,13 +293,38 @@ describe("ZigbeeBridge", () => {
 
   it("opens pairing through the bridge request API", async () => {
     makeBridge();
-    await bridge.permitJoin("main", 254);
-    expect(mqtt.published).toEqual([
-      { topic: `${BASE}/bridge/request/permit_join`, message: '{"time":254}' },
-    ]);
+    const opened = bridge.permitJoin("main", 254);
+    await Promise.resolve();
+    const request = mqtt.published.at(-1)!;
+    expect(request.topic).toBe(`${BASE}/bridge/request/permit_join`);
+    const { time, transaction } = JSON.parse(request.message) as {
+      time: number;
+      transaction: string;
+    };
+    expect(time).toBe(254);
+    mqtt.deliver(`${BASE}/bridge/response/permit_join`, {
+      status: "ok",
+      data: { time: 254 },
+      transaction,
+    });
+    await expect(opened).resolves.toBeUndefined();
     await expect(bridge.permitJoin("nope", 10)).rejects.toThrow(
       /unknown network/,
     );
+  });
+
+  it("reports the pairing window from bridge/info", () => {
+    makeBridge();
+    const end = Date.now() + 120_000;
+    mqtt.deliver(`${BASE}/bridge/info`, {
+      permit_join: true,
+      permit_join_end: end,
+    });
+    const seconds = bridge.status()[0]!.pairingSeconds;
+    expect(seconds).toBeGreaterThan(115);
+    expect(seconds).toBeLessThanOrEqual(120);
+    mqtt.deliver(`${BASE}/bridge/info`, { permit_join: false });
+    expect(bridge.status()[0]!.pairingSeconds).toBeUndefined();
   });
 
   describe("retained state", () => {
@@ -523,5 +550,23 @@ describe("ZigbeeBridge", () => {
       await bridge.stop();
       expect((await renamed).message).toBe("stopped");
     });
+  });
+});
+
+describe("pairing window", () => {
+  it("reads it from bridge/info only while pairing is on", () => {
+    expect(pairingEnd({ permit_join: true, permit_join_end: 5000 })).toBe(5000);
+    expect(pairingEnd({ permit_join: false, permit_join_end: 5000 })).toBe(
+      undefined,
+    );
+    expect(pairingEnd({ permit_join: true })).toBeUndefined();
+    expect(pairingEnd(undefined)).toBeUndefined();
+  });
+
+  it("counts whole seconds up to the end", () => {
+    expect(secondsUntil(10_000, 0)).toBe(10);
+    expect(secondsUntil(10_001, 0)).toBe(11);
+    expect(secondsUntil(10_000, 10_000)).toBeUndefined();
+    expect(secondsUntil(undefined, 0)).toBeUndefined();
   });
 });

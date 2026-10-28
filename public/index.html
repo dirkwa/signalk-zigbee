@@ -197,7 +197,8 @@
         return [net.message || net.phase, "warn"];
       }
 
-      async function permitJoin(id, button) {
+      /** Opens pairing, or closes it with 0 seconds. */
+      async function permitJoin(id, seconds, button) {
         button.disabled = true;
         try {
           const res = await fetch(
@@ -205,17 +206,34 @@
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ seconds: 254 }),
+              body: JSON.stringify({ seconds }),
             },
           );
-          const body = await res.json();
-          button.textContent = res.ok
-            ? "Pairing open (~4 min)"
-            : body.error || "Failed";
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            button.textContent = body.error || `Failed (${res.status})`;
+            return;
+          }
+          // Zigbee2MQTT confirmed; the window comes back with the status.
+          await refresh();
         } catch (err) {
           button.textContent = String(err);
         }
       }
+
+      /** "3:52" for 232 seconds. */
+      function clock(seconds) {
+        const s = Math.max(0, Math.ceil(seconds));
+        return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      }
+
+      // Count the pairing window down between two status refreshes.
+      setInterval(() => {
+        for (const node of document.querySelectorAll("[data-pairing-end]")) {
+          const left = (Number(node.dataset.pairingEnd) - Date.now()) / 1000;
+          node.textContent = `Pairing open, ${clock(left)}`;
+        }
+      }, 1000);
 
       function startRename(net, device) {
         editing = {
@@ -333,8 +351,27 @@
         const frontend =
           `${location.protocol}//${location.hostname}:${net.frontendPort}/` +
           (token ? `?token=${encodeURIComponent(token)}` : "");
-        const pair = el("button", {}, "Allow pairing");
-        pair.onclick = () => permitJoin(net.id, pair);
+        const pairing = net.pairingSeconds !== undefined;
+        const pair = el(
+          "button",
+          {},
+          pairing ? "Stop pairing" : "Allow pairing",
+        );
+        pair.onclick = () => permitJoin(net.id, pairing ? 0 : 254, pair);
+        // The end in this browser's clock, so the countdown ignores any
+        // clock difference to the server.
+        const countdown = pairing
+          ? el(
+              "span",
+              {
+                class: "ok",
+                "data-pairing-end": String(
+                  Date.now() + net.pairingSeconds * 1000,
+                ),
+              },
+              `Pairing open, ${clock(net.pairingSeconds)}`,
+            )
+          : null;
         const rows = net.devices.map((d) =>
           el(
             "tr",
@@ -369,6 +406,7 @@
             el(
               "span",
               { class: "actions" },
+              net.phase === "running" ? countdown : null,
               net.phase === "running" ? pair : null,
               net.phase === "running"
                 ? el(
