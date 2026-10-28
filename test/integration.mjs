@@ -1,7 +1,9 @@
 // Run by the Signal K plugin CI (npm run test:integration) once it has
 // started a server with this plugin enabled and an empty configuration.
 // The CI itself only checks that the plugin is listed, which Signal K also
-// does for a plugin whose start() threw, so ask the plugin's own API.
+// does for a plugin whose start() threw, so ask the plugin's own API that
+// start() ran and the configuration is valid. The container start-up that
+// follows needs a container runtime and is not covered here.
 const url = `${process.env.SIGNALK_URL ?? "http://localhost:3000"}/plugins/signalk-zigbee/api/status`;
 const ATTEMPTS = 10;
 
