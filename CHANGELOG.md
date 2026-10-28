@@ -1,3 +1,10 @@
+# v0.1.1
+
+- The app icon and the screenshot now show in the Signal K admin UI and in
+  the App Store, also offline. Signal K resolves both relative to the web
+  app's `public` folder, where `public/icon.svg` did not exist.
+- The web app has a favicon.
+
 # v0.1.0
 
 First release.
