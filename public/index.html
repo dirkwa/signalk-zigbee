@@ -50,6 +50,11 @@
         font-size: 1.3rem;
         margin: 0 0 12px;
       }
+      .version {
+        font-size: 0.8rem;
+        font-weight: 400;
+        margin-left: 6px;
+      }
       section {
         background: var(--card);
         border: 1px solid var(--line);
@@ -151,7 +156,7 @@
   </head>
   <body>
     <main>
-      <h1>Zigbee</h1>
+      <h1>Zigbee<span id="version" class="version muted"></span></h1>
       <div id="root" class="muted">Loading…</div>
     </main>
     <script>
@@ -406,6 +411,9 @@
       function render(status) {
         if (!status) return;
         lastStatus = status;
+        if (status.version) {
+          document.getElementById("version").textContent = `v${status.version}`;
+        }
         const nodes = [];
         if (status.problems.length) {
           nodes.push(
