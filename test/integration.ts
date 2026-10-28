@@ -4,17 +4,32 @@
 // does for a plugin whose start() threw, so ask the plugin's own API that
 // start() ran and the configuration is valid. The container start-up that
 // follows needs a container runtime and is not covered here.
+//
+// Node runs this file directly (type stripping), so it uses erasable
+// TypeScript only.
+
+/** The part of GET /api/status this check reads. */
+interface Status {
+  running: boolean;
+  problems: string[];
+}
+
 const url = `${process.env.SIGNALK_URL ?? "http://localhost:3000"}/plugins/signalk-zigbee/api/status`;
 const ATTEMPTS = 10;
 
-let status;
+function fail(message: string): never {
+  console.error(`::error::${message}`);
+  process.exit(1);
+}
+
+let status: Status | undefined;
 for (let attempt = 1; status === undefined; attempt++) {
   try {
     const res = await fetch(url);
-    if (res.ok) status = await res.json();
+    if (res.ok) status = (await res.json()) as Status;
     else if (attempt === ATTEMPTS) fail(`${url} answered ${res.status}`);
   } catch (err) {
-    if (attempt === ATTEMPTS) fail(`${url} failed: ${err}`);
+    if (attempt === ATTEMPTS) fail(`${url} failed: ${String(err)}`);
   }
   if (status === undefined) await new Promise((r) => setTimeout(r, 1000));
 }
@@ -22,8 +37,3 @@ for (let attempt = 1; status === undefined; attempt++) {
 if (status.running !== true) fail("the plugin did not start");
 if (status.problems.length > 0) fail(`problems: ${status.problems.join(" ")}`);
 console.log(`signalk-zigbee started: ${JSON.stringify(status)}`);
-
-function fail(message) {
-  console.error(`::error::${message}`);
-  process.exit(1);
-}

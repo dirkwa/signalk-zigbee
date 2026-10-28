@@ -28,7 +28,7 @@ coordinator is its own Zigbee network; networks are never merged.
 - `src/exposes.ts`: Zigbee2MQTT exposes to Signal K paths, units and metadata.
 - `src/discovery.ts`: mDNS discovery of espOS coordinators.
 - `public/`: the web app (`index.html`, plain JS), icon and screenshot.
-- `test/*.test.ts`: vitest unit tests; `test/integration.mjs`: the check the
+- `test/*.test.ts`: vitest unit tests; `test/integration.ts`: the check the
   Signal K plugin CI runs against a real server.
 
 ## Commands
