@@ -121,6 +121,9 @@ export class ZigbeeRunner {
     }
     const abort = new AbortController();
     this.abort = abort;
+    // A previous run's queued reconciles bail out on their aborted signal;
+    // this run must not wait behind them.
+    this.esposChain = Promise.resolve();
     startSafely(this.app, () =>
       this.bringUp(settings, abort.signal).catch((err: unknown) => {
         // startSafely only sets the status line, which needs an admin login
@@ -291,8 +294,12 @@ export class ZigbeeRunner {
       await this.startUsbNetwork(net, signal);
     }
     // Coordinators mDNS has not announced yet wait in "waiting"; their
-    // announcement triggers onDiscoveryChange, which starts them.
-    await this.reconcileEspos(signal);
+    // announcement triggers onDiscoveryChange, which starts them. Queued
+    // behind any reconcile an announcement started during the USB start-up,
+    // so no espOS network is started twice.
+    const reconcile = this.esposChain.then(() => this.reconcileEspos(signal));
+    this.esposChain = reconcile.catch(() => undefined);
+    await reconcile;
     this.report();
   }
 

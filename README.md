@@ -112,6 +112,9 @@ Units are converted to SI: °C → K, % → ratio, hPa → Pa, mV → V, kWh →
 so on. Calibration and offset values are treated as differences (+1 °C is
 +1 K). Units without an SI counterpart (lx, ppm, lqi) pass through unchanged
 and are named in the path metadata. On/off values become `true`/`false`.
+Composite and list properties (a light's `color` with its `x`/`y`, a
+schedule, the OTA `update` block) are not mapped; use the Zigbee2MQTT
+interface for those.
 
 A PUT is converted back to Zigbee2MQTT's units and sent as a `/set` request.
 Battery-powered sensors only listen right after they wake up: press the
@@ -153,6 +156,13 @@ npm run build     # tsc → dist/
 npm run format    # prettier + eslint --fix
 npm run ci-lint   # what CI runs
 ```
+
+Releases are published by `.github/workflows/publish.yml` when a `v*` tag is
+pushed (`npm run release`), through npm trusted publishing. npm can only
+trust a workflow for a package that already exists, so the very first
+version is published by hand (`npm publish --access public`); then add
+`dirkwa/signalk-zigbee` / `publish.yml` as the trusted publisher on
+npmjs.com.
 
 ## License
 

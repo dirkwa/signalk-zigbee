@@ -13,7 +13,7 @@ import {
 } from "../src/stack.js";
 
 const MOUNT = {
-  source: "/home/me/.signalk/plugin-config-data/signalk-zigbee",
+  source: "/var/lib/signalk/plugin-config-data/signalk-zigbee",
   containerPath: "/data",
 };
 const USB = "/dev/serial/by-id/usb-stick-if00-port0";
