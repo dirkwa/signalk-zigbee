@@ -158,12 +158,15 @@ npm run format    # prettier + eslint --fix
 npm run ci-lint   # what CI runs
 ```
 
-Releases are published by `.github/workflows/publish.yml` when a `v*` tag is
-pushed (`npm run release`), through npm trusted publishing. npm can only
-trust a workflow for a package that already exists, so the very first
-version is published by hand (`npm publish --access public`); then add
-`dirkwa/signalk-zigbee` / `publish.yml` as the trusted publisher on
-npmjs.com.
+release-please cuts releases; never bump `package.json`'s version by hand.
+Squash-merge pull requests with a Conventional Commit title: `feat` gives a
+minor release, `fix`, `perf` or `revert` a patch, and `!` or a
+`BREAKING CHANGE:` footer a major one. release-please keeps a
+`chore: release x.y.z` pull request open; merging it tags the release,
+creates the GitHub Release and publishes to npm through trusted publishing,
+all in `.github/workflows/publish.yml`. The release notes are generated from
+the merged pull requests, grouped by the labels `label-by-title.yml` sets
+from their titles.
 
 ## License
 
