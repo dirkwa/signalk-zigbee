@@ -15,6 +15,7 @@
     "build": "tsc",
     "test": "npm run typecheck:test && vitest run",
     "test:watch": "vitest",
+    "test:integration": "node test/integration.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc --noEmit --project tsconfig.test.json",
     "prettier": "prettier --write .",
