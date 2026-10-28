@@ -7,6 +7,7 @@
  * definitions. Writable device settings accept Signal K PUTs.
  */
 
+import { readFileSync } from "node:fs";
 import type { Plugin, ServerAPI } from "@signalk/server-api";
 import { errMsg, type StopOptions } from "signalk-container-helper";
 import {
@@ -36,6 +37,13 @@ interface PluginRouter {
   /** Permission registrar (Signal K ≥ 2.x); feature-detect. */
   access?(level: "readonly" | "readwrite"): PluginRouter;
 }
+
+/** The installed version, shown in the web app. */
+const VERSION = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string }
+).version;
 
 /** Zigbee2MQTT's longest permit-join window. */
 const MAX_PERMIT_JOIN_S = 254;
@@ -73,7 +81,7 @@ export default function createPlugin(app: ServerAPI): Plugin {
 
       // GET /plugins/signalk-zigbee/api/status
       readonly.get("/api/status", (_req, res) => {
-        res.json(runner.status());
+        res.json({ ...runner.status(), version: VERSION });
       });
 
       // GET /plugins/signalk-zigbee/api/frontend-tokens — admin only: each
