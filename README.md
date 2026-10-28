@@ -87,7 +87,8 @@ linked from the same page, for OTA updates and the network map.
 ## Signal K paths
 
 By default a device lands under `zigbee.<network>.<name>`, where `<name>` is
-its Zigbee2MQTT friendly name in camelCase. Rename the device (in the Zigbee
+its Zigbee2MQTT friendly name in camelCase (`TEMP internal` becomes
+`tempInternal`). Rename the device (in the Zigbee
 web app or in Zigbee2MQTT) and the paths follow; values under the old path
 stay in the Data Browser until Signal K restarts. The template is configurable (`{network}`, `{name}`,
 `{ieee}`), and **Per-device paths** gives a single device a meaningful place

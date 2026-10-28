@@ -54,6 +54,14 @@ describe("camelSegment", () => {
     expect(camelSegment("bilge/aft-sensor")).toBe("bilgeAftSensor");
     expect(camelSegment("…")).toBe("unnamed");
   });
+
+  it("treats a word in capitals as a plain word", () => {
+    expect(camelSegment("TEMP_internal")).toBe("tempInternal");
+    expect(camelSegment("Salon LED strip")).toBe("salonLedStrip");
+    expect(camelSegment("SNZB-02D")).toBe("snzb02d");
+    expect(camelSegment("LivingRoom")).toBe("livingRoom");
+    expect(camelSegment("state_L1")).toBe("stateL1");
+  });
 });
 
 describe("devicePath", () => {
