@@ -10,5 +10,8 @@ First release.
   `ghcr.io/tostmann/zigbee2mqtt-esp32`.
 - Every paired device is mapped to Signal K paths from Zigbee2MQTT's device
   definitions, with SI units and metadata. Writable settings accept PUT.
+- Device state is retained on the broker with Zigbee2MQTT's `last_seen`, so
+  paths are back right after a Signal K restart, with the time each value
+  was reported.
 - Web app with network status, device list, pairing button, device
   renaming and links to each Zigbee2MQTT interface.

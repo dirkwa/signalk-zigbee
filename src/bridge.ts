@@ -114,6 +114,20 @@ interface NetworkState extends BridgeNetwork {
   online: boolean | undefined;
   /** Keyed by friendly name, which is what state topics carry. */
   devices: Map<string, DeviceEntry>;
+  /**
+   * Device state that arrived before the device list, by friendly name.
+   * Retained messages come in topic order after subscribing, so a sensor's
+   * last state can beat bridge/devices.
+   */
+  earlyState: Map<string, ReportedState>;
+  /** Whether the retain/last_seen options were already requested. */
+  optionsRequested: boolean;
+}
+
+interface ReportedState {
+  body: Record<string, unknown>;
+  /** When the device reported it, as an ISO timestamp. */
+  timestamp: string;
 }
 
 interface PathTarget {
@@ -131,9 +145,29 @@ interface PendingRequest {
 const SELF = "vessels.self";
 const RECONNECT_MS = 5000;
 const REQUEST_TIMEOUT_MS = 10_000;
+/** Bounds earlyState against topics that never become devices (groups). */
+const MAX_EARLY_STATES = 256;
 /** Zigbee2MQTT echoes this field in the matching bridge/response. */
 const TRANSACTION_BYTES = 6;
 const DEVICE_TOPIC_SUFFIXES = ["/set", "/get", "/availability"];
+
+/**
+ * Zigbee2MQTT's last_seen (ISO_8601, ISO_8601_local or epoch ms) when
+ * present, so a retained state keeps the time it was really reported.
+ */
+function reportedAt(body: Record<string, unknown>): string {
+  const seen = body.last_seen;
+  const ms =
+    typeof seen === "number"
+      ? seen
+      : typeof seen === "string"
+        ? Date.parse(seen)
+        : Number.NaN;
+  const date = new Date(Number.isFinite(ms) ? ms : Date.now());
+  return Number.isNaN(date.getTime())
+    ? new Date().toISOString()
+    : date.toISOString();
+}
 
 function jsonPayload(payload: Buffer): unknown {
   try {
@@ -163,6 +197,8 @@ export class ZigbeeBridge {
         ...net,
         online: undefined,
         devices: new Map(),
+        earlyState: new Map(),
+        optionsRequested: false,
       });
     }
   }
@@ -387,6 +423,10 @@ export class ZigbeeBridge {
       if (Array.isArray(body)) this.updateDevices(net, body as Z2mDevice[]);
       return;
     }
+    if (rest === "bridge/info") {
+      this.ensureOptions(net, jsonPayload(payload));
+      return;
+    }
     if (rest.startsWith("bridge/response/")) {
       this.onResponse(payload);
       return;
@@ -394,11 +434,70 @@ export class ZigbeeBridge {
     if (rest.startsWith("bridge/")) return;
     if (DEVICE_TOPIC_SUFFIXES.some((suffix) => rest.endsWith(suffix))) return;
 
-    const entry = net.devices.get(rest);
-    if (entry === undefined || !entry.enabled) return;
     const body = jsonPayload(payload);
-    if (typeof body !== "object" || body === null) return;
-    this.emitState(net, entry, body as Record<string, unknown>);
+    if (typeof body !== "object" || body === null) {
+      // An empty retained message clears the topic, e.g. after a rename.
+      net.earlyState.delete(rest);
+      return;
+    }
+    const state: ReportedState = {
+      body: body as Record<string, unknown>,
+      timestamp: reportedAt(body as Record<string, unknown>),
+    };
+    const entry = net.devices.get(rest);
+    if (entry === undefined) {
+      net.earlyState.delete(rest);
+      if (net.earlyState.size >= MAX_EARLY_STATES) {
+        const oldest = net.earlyState.keys().next().value;
+        if (oldest !== undefined) net.earlyState.delete(oldest);
+      }
+      net.earlyState.set(rest, state);
+      return;
+    }
+    if (entry.enabled) this.emitState(net, entry, state);
+  }
+
+  /**
+   * Zigbee2MQTT does not retain device state by default, so after a
+   * Signal K restart a sensor's paths would stay empty until it reports
+   * again, which can take an hour. Retained state plus last_seen gives the
+   * last values back right away, with the time they were reported.
+   */
+  private ensureOptions(net: NetworkState, info: unknown): void {
+    if (net.optionsRequested) return;
+    const config = (
+      info as
+        | {
+            config?: {
+              device_options?: { retain?: unknown };
+              advanced?: { last_seen?: unknown };
+            };
+          }
+        | undefined
+    )?.config;
+    if (typeof config !== "object" || config === null) return;
+    const options: Record<string, unknown> = {};
+    if (config.device_options?.retain !== true) {
+      options.device_options = { retain: true };
+    }
+    const lastSeen = config.advanced?.last_seen;
+    if (typeof lastSeen !== "string" || lastSeen === "disable") {
+      options.advanced = { last_seen: "ISO_8601" };
+    }
+    if (Object.keys(options).length === 0) return;
+    net.optionsRequested = true;
+    this.request(net, "options", { options }).then(
+      () =>
+        this.app.debug(
+          `${net.id}: Zigbee2MQTT now retains device state with last_seen`,
+        ),
+      (err: Error) => {
+        if (this.client === undefined) return;
+        this.app.error(
+          `${net.id}: could not enable retained device state: ${err.message}`,
+        );
+      },
+    );
   }
 
   private basePathFor(
@@ -458,23 +557,31 @@ export class ZigbeeBridge {
         updates: [{ $source: this.source(net), meta }],
       });
     }
+    for (const [name, entry] of net.devices) {
+      const state = net.earlyState.get(name);
+      if (state === undefined) continue;
+      net.earlyState.delete(name);
+      if (entry.enabled) this.emitState(net, entry, state);
+    }
     this.options.onChange?.();
   }
 
   private emitState(
     net: NetworkState,
     entry: DeviceEntry,
-    state: Record<string, unknown>,
+    state: ReportedState,
   ): void {
     const values: { path: string; value: unknown }[] = [];
     for (const mapping of entry.mappings) {
-      if (!(mapping.property in state)) continue;
-      const value = mapping.toSk(state[mapping.property]);
+      if (!(mapping.property in state.body)) continue;
+      const value = mapping.toSk(state.body[mapping.property]);
       if (value !== undefined) values.push({ path: mapping.path, value });
     }
     if (values.length === 0) return;
     this.app.handleMessage(PLUGIN_ID, {
-      updates: [{ $source: this.source(net), values }],
+      updates: [
+        { $source: this.source(net), timestamp: state.timestamp, values },
+      ],
     });
   }
 

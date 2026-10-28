@@ -300,6 +300,85 @@ describe("ZigbeeBridge", () => {
     );
   });
 
+  describe("retained state", () => {
+    const SEEN = "2026-10-28T01:07:19.523Z";
+
+    function lastUpdate() {
+      return app.deltas.at(-1)!.updates[0] as {
+        timestamp?: string;
+        values?: { path: string; value: unknown }[];
+      };
+    }
+
+    it("replays state that arrived before the device list, at its last_seen time", () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/Salon`, { temperature: 21.3, last_seen: SEEN });
+      expect(app.values()).toEqual({});
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      expect(app.values()["zigbee.main.salon.temperature"]).toBe(294.45);
+      expect(lastUpdate().timestamp).toBe(SEEN);
+
+      // Consumed once: a later device list does not replay it again.
+      const count = app.deltas.length;
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      expect(app.deltas.length).toBe(count + 1); // meta only
+    });
+
+    it("reads epoch last_seen and falls back to the receipt time", () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      mqtt.deliver(`${BASE}/Salon`, {
+        temperature: 20,
+        last_seen: Date.parse(SEEN),
+      });
+      expect(lastUpdate().timestamp).toBe(SEEN);
+
+      const before = Date.now();
+      mqtt.deliver(`${BASE}/Salon`, { temperature: 20, last_seen: "never" });
+      expect(Date.parse(lastUpdate().timestamp!)).toBeGreaterThanOrEqual(
+        before,
+      );
+    });
+
+    it("forgets early state that an empty retained message cleared", () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/Salon`, { temperature: 21.3 });
+      mqtt.emit("message", `${BASE}/Salon`, Buffer.alloc(0));
+      mqtt.deliver(`${BASE}/bridge/devices`, [sensor("Salon")]);
+      expect(app.values()).toEqual({});
+    });
+
+    it("asks Zigbee2MQTT once to retain state and add last_seen", () => {
+      makeBridge();
+      const info = {
+        config: { device_options: {}, advanced: { last_seen: "disable" } },
+      };
+      mqtt.deliver(`${BASE}/bridge/info`, info);
+      mqtt.deliver(`${BASE}/bridge/info`, info);
+      const requests = mqtt.published.filter(
+        (m) => m.topic === `${BASE}/bridge/request/options`,
+      );
+      expect(requests).toHaveLength(1);
+      expect(JSON.parse(requests[0]!.message)).toMatchObject({
+        options: {
+          device_options: { retain: true },
+          advanced: { last_seen: "ISO_8601" },
+        },
+      });
+    });
+
+    it("leaves Zigbee2MQTT's options alone once they are set", () => {
+      makeBridge();
+      mqtt.deliver(`${BASE}/bridge/info`, {
+        config: {
+          device_options: { retain: true },
+          advanced: { last_seen: "epoch" },
+        },
+      });
+      expect(mqtt.published).toEqual([]);
+    });
+  });
+
   describe("renameDevice", () => {
     const IEEE = "0x00124b0029fd1234";
 

@@ -135,6 +135,12 @@ Zigbee2MQTT as environment overrides, so changes you make in the
 Zigbee2MQTT interface are kept. Each network publishes under the MQTT base
 topic `zigbee2mqtt-<id>`.
 
+Two Zigbee2MQTT options are switched on through its options API, because a
+sensor may report only once an hour: `device_options.retain`, so the broker
+keeps each device's last state, and `advanced.last_seen` (ISO 8601), so that
+state keeps the time it was reported. After a Signal K restart the paths are
+filled again right away, with their original timestamps.
+
 Disabling the plugin stops the containers; re-enabling starts them again
 without a pull. Removing or disabling a network stops its container.
 
