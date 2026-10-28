@@ -114,6 +114,9 @@ describe("SNZB-02D", () => {
     expect(byProperty("temperature").toSk(21.3)).toBeCloseTo(294.45, 6);
     expect(byProperty("temperature").meta.units).toBe("K");
     expect(byProperty("humidity").toSk(55.2)).toBeCloseTo(0.552, 6);
+    // Exact, without float noise from the scaling.
+    expect(byProperty("humidity").toSk(57.1)).toBe(0.571);
+    expect(byProperty("temperature").toSk(31.2)).toBe(304.35);
     expect(byProperty("humidity").meta.units).toBe("ratio");
     expect(byProperty("battery").toSk(100)).toBe(1);
   });

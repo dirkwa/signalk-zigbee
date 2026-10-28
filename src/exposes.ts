@@ -184,6 +184,12 @@ function finite(value: unknown): number | undefined {
     : undefined;
 }
 
+/**
+ * Scaling leaves binary noise (57.1 % → 0.5710000000000001); twelve
+ * significant digits are far beyond any Zigbee sensor's resolution.
+ */
+const SK_PRECISION = 12;
+
 function numericMapping(
   expose: Expose,
 ): Pick<PathMapping, "toSk" | "fromSk"> & { units?: string } {
@@ -208,7 +214,9 @@ function numericMapping(
     units: conversion.units,
     toSk: (value) => {
       const n = finite(value);
-      return n === undefined ? undefined : n * conversion.scale + offset;
+      return n === undefined
+        ? undefined
+        : Number((n * conversion.scale + offset).toPrecision(SK_PRECISION));
     },
     fromSk: (value) => {
       const n = finite(value);
