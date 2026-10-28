@@ -100,6 +100,8 @@ export interface NetworkStatus {
   baseTopic: string;
   /** Zigbee2MQTT's own bridge/state; undefined until it reported once. */
   online: boolean | undefined;
+  /** Seconds until pairing closes; undefined while it is closed. */
+  pairingSeconds: number | undefined;
   devices: DeviceStatus[];
 }
 
@@ -122,6 +124,8 @@ interface NetworkState extends BridgeNetwork {
   earlyState: Map<string, ReportedState>;
   /** Whether the retain/last_seen options were already requested. */
   optionsRequested: boolean;
+  /** When pairing closes (ms since the epoch), from bridge/info. */
+  pairingEnd: number | undefined;
 }
 
 interface ReportedState {
@@ -169,6 +173,27 @@ function reportedAt(body: Record<string, unknown>): string {
     : date.toISOString();
 }
 
+/**
+ * When pairing closes, from bridge/info: Zigbee2MQTT 2.x reports
+ * `permit_join` and, while it is on, `permit_join_end` in ms since the epoch.
+ */
+export function pairingEnd(info: unknown): number | undefined {
+  const { permit_join: open, permit_join_end: end } = (info ?? {}) as {
+    permit_join?: unknown;
+    permit_join_end?: unknown;
+  };
+  return open === true && typeof end === "number" ? end : undefined;
+}
+
+/** Whole seconds left until `end`; undefined once it has passed. */
+export function secondsUntil(
+  end: number | undefined,
+  now = Date.now(),
+): number | undefined {
+  if (end === undefined || end <= now) return undefined;
+  return Math.ceil((end - now) / 1000);
+}
+
 function jsonPayload(payload: Buffer): unknown {
   try {
     return JSON.parse(payload.toString("utf8"));
@@ -199,6 +224,7 @@ export class ZigbeeBridge {
         devices: new Map(),
         earlyState: new Map(),
         optionsRequested: false,
+        pairingEnd: undefined,
       });
     }
   }
@@ -255,6 +281,7 @@ export class ZigbeeBridge {
       id: net.id,
       baseTopic: net.baseTopic,
       online: net.online,
+      pairingSeconds: secondsUntil(net.pairingEnd),
       devices: [...net.devices.values()].map((entry) => ({
         ieeeAddress: entry.device.ieee_address,
         friendlyName: entry.device.friendly_name,
@@ -272,15 +299,16 @@ export class ZigbeeBridge {
     }));
   }
 
-  /** Open the network for pairing; 0 closes it again. */
-  permitJoin(networkId: string, seconds: number): Promise<void> {
+  /**
+   * Open the network for pairing; 0 closes it again. Resolves once
+   * Zigbee2MQTT confirmed it; the window itself arrives with bridge/info.
+   */
+  async permitJoin(networkId: string, seconds: number): Promise<void> {
     const net = this.findNetwork(networkId);
     if (net === undefined) {
-      return Promise.reject(new Error(`unknown network "${networkId}"`));
+      throw new BridgeRequestError(`unknown network "${networkId}"`, 404);
     }
-    return this.publish(`${net.baseTopic}/bridge/request/permit_join`, {
-      time: seconds,
-    });
+    await this.request(net, "permit_join", { time: seconds });
   }
 
   /**
@@ -424,7 +452,10 @@ export class ZigbeeBridge {
       return;
     }
     if (rest === "bridge/info") {
-      this.ensureOptions(net, jsonPayload(payload));
+      const info = jsonPayload(payload);
+      net.pairingEnd = pairingEnd(info);
+      this.options.onChange?.();
+      this.ensureOptions(net, info);
       return;
     }
     if (rest.startsWith("bridge/response/")) {

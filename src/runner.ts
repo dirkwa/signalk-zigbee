@@ -71,6 +71,8 @@ export interface NetworkReport {
   baseTopic: string;
   coordinatorAddress?: string;
   online?: boolean;
+  /** Seconds until pairing closes; absent while it is closed. */
+  pairingSeconds?: number;
   devices: NetworkStatus["devices"];
 }
 
@@ -182,6 +184,7 @@ export class ZigbeeRunner {
           baseTopic: baseTopic(run.net.id),
           coordinatorAddress: run.serialPort,
           online: live?.online,
+          pairingSeconds: live?.pairingSeconds,
           devices: live?.devices ?? [],
         };
       }),
