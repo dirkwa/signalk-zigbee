@@ -31,6 +31,13 @@ export const MOSQUITTO_CONTAINER = "zigbee-mosquitto";
  */
 export const MOSQUITTO_DATA_MOUNT = "/mosquitto/data";
 const MOSQUITTO_LOG_MOUNT = "/mosquitto/log";
+/**
+ * The image's `mosquitto` user. Running as it, rather than as root, matters
+ * because the image entrypoint runs `chown -R mosquitto /mosquitto` when
+ * started as root, which would hand the whole bind-mounted data directory
+ * (Zigbee network keys included) to an unmapped uid.
+ */
+const MOSQUITTO_UID = 1883;
 export const Z2M_CONTAINER_PREFIX = "zigbee2mqtt-";
 /** Where a USB coordinator appears inside its Zigbee2MQTT container. */
 export const COORDINATOR_DEVICE = "/dev/zigbee";
@@ -52,14 +59,12 @@ export function mqttServer(settings: Settings): string {
 /**
  * Loopback only and anonymous: the broker exists for Zigbee2MQTT and this
  * plugin. Persistence keeps Zigbee2MQTT's retained device list across a
- * broker restart. `user root` stops Mosquitto from dropping to its image
- * user, which could not write the bind-mounted data directory.
+ * broker restart.
  */
 export function mosquittoConf(port: number, dataDir: string): string {
   return [
     `listener ${port} 127.0.0.1`,
     "allow_anonymous true",
-    "user root",
     "persistence true",
     `persistence_location ${dataDir}/`,
     "log_dest stdout",
@@ -82,6 +87,9 @@ export function mosquittoContainer(
       [MOSQUITTO_LOG_MOUNT]: mount.source,
     },
     command: ["mosquitto", "-c", `${dir}/mosquitto.conf`],
+    // signalk-container maps this uid to the Signal K user, so files the
+    // broker writes stay owned by that user on the host.
+    user: { inImageUid: MOSQUITTO_UID, inImageGid: MOSQUITTO_UID },
     resources: { memory: MOSQUITTO_MEMORY },
   };
 }

@@ -31,6 +31,7 @@ describe("mosquitto", () => {
     const conf = mosquittoConf(1883, "/data/mosquitto/data");
     expect(conf).toContain("listener 1883 127.0.0.1");
     expect(conf).toContain("persistence_location /data/mosquitto/data/");
+    expect(conf).not.toContain("user root");
   });
 
   it("runs on the host network with the plugin's config", () => {
@@ -44,6 +45,7 @@ describe("mosquitto", () => {
         "/mosquitto/log": MOUNT.source,
       },
       command: ["mosquitto", "-c", "/mosquitto/data/mosquitto/mosquitto.conf"],
+      user: { inImageUid: 1883, inImageGid: 1883 },
     });
   });
 
