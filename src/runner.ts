@@ -113,14 +113,24 @@ export class ZigbeeRunner {
     this.problems = validate(settings);
     if (this.problems.length > 0) {
       this.app.setPluginError(this.problems.join(" "));
+      this.app.debug(`not starting: ${this.problems.join(" ")}`);
       return;
     }
     if (settings.networks.every((net) => !net.enabled)) {
-      this.app.setPluginStatus("No Zigbee network configured yet");
+      this.progress("No Zigbee network configured yet");
     }
     const abort = new AbortController();
     this.abort = abort;
-    startSafely(this.app, () => this.bringUp(settings, abort.signal));
+    startSafely(this.app, () =>
+      this.bringUp(settings, abort.signal).catch((err: unknown) => {
+        // startSafely only sets the status line, which needs an admin login
+        // to read; keep a trace in the server log as well.
+        if (!abort.signal.aborted) {
+          this.app.error(`start-up failed: ${errMsg(err)}`);
+        }
+        throw err;
+      }),
+    );
   }
 
   async stop(options?: StopOptions): Promise<void> {
@@ -195,7 +205,7 @@ export class ZigbeeRunner {
       timeoutMs: MANAGER_TIMEOUT_MS,
       signal,
       onWaiting: (phase) =>
-        this.app.setPluginStatus(
+        this.progress(
           phase === "manager"
             ? "Waiting for signalk-container"
             : "Waiting for the container runtime",
@@ -210,6 +220,7 @@ export class ZigbeeRunner {
     }
     this.manager = manager;
 
+    this.progress("Preparing the data directory");
     const hostDir = this.app.getDataDirPath();
     const mount = await resolveMount(manager, {
       containerPath: "/data",
@@ -222,7 +233,7 @@ export class ZigbeeRunner {
     });
     await writeMosquittoFiles(hostDir, settings, brokerMount.containerPath);
 
-    this.app.setPluginStatus("Starting the MQTT broker");
+    this.progress("Starting the MQTT broker");
     this.broker = new ManagedContainer({
       app: this.app,
       pluginId: PLUGIN_ID,
@@ -425,11 +436,18 @@ export class ZigbeeRunner {
     }
   }
 
+  /** Start-up steps go to the debug log too: the status line needs a login. */
+  private progress(message: string): void {
+    this.app.setPluginStatus(message);
+    this.app.debug(message);
+  }
+
   private setPhase(id: string, phase: NetworkPhase, message?: string): void {
     const run = this.runs.get(id);
     if (run === undefined) return;
     run.phase = phase;
     run.message = message;
+    this.app.debug(`${id}: ${phase}${message ? ` (${message})` : ""}`);
     this.report();
   }
 
