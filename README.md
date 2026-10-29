@@ -62,7 +62,7 @@ be chosen per network.
 
 An espOS coordinator accepts a single TCP connection, which Zigbee2MQTT
 holds. The plugin therefore never connects to it itself: it finds the
-coordinator through mDNS (service `_zigbee-coordinator._tcp`) and restarts
+coordinator through mDNS (service `_espos-zigbee._tcp`) and restarts
 that network's Zigbee2MQTT when the coordinator announces a new address.
 Coordinators seen on mDNS that no network uses yet are listed in the plugin
 status and in the web app.
