@@ -30,7 +30,7 @@ export const ESPOS_ADAPTER = "zboss";
  * mDNS service type espOS Zigbee coordinators advertise, without the
  * leading underscore and protocol (bonjour-service form).
  */
-export const ESPOS_MDNS_SERVICE = "zigbee-coordinator";
+export const ESPOS_MDNS_SERVICE = "espos-zigbee";
 
 export const ADAPTERS = [
   "ember",
