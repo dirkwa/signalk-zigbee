@@ -47,6 +47,10 @@
     "requires": [
       "signalk-container"
     ],
+    "recommends": [
+      "signalk-rules",
+      "signalk-espos-manager"
+    ],
     "screenshots": [
       "./screenshots/1_signalk-zigbee.png"
     ]
