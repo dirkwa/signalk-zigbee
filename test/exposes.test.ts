@@ -150,9 +150,30 @@ describe("SNZB-02D", () => {
   });
 
   it("passes units without an SI counterpart through", () => {
+    const illuminance = exposeMapping(
+      { type: "numeric", property: "illuminance", access: 1, unit: "lx" },
+      "environment.inside.saloon",
+    );
+    expect(illuminance.toSk(120)).toBe(120);
+    expect(illuminance.meta.units).toBe("lx");
+    expect(illuminance.meta.renderer).toBeUndefined();
+  });
+
+  it("reports link quality as a share of the best link", () => {
     const lqi = byProperty("linkquality");
-    expect(lqi.toSk(120)).toBe(120);
-    expect(lqi.meta.units).toBe("lqi");
+    expect(lqi.toSk(255)).toBe(1);
+    expect(lqi.toSk(51)).toBe(0.2);
+    expect(lqi.toSk(0)).toBe(0);
+    expect(lqi.meta.units).toBe("ratio");
+  });
+
+  it("draws link quality as a meter that turns yellow, then red", () => {
+    expect(byProperty("linkquality").meta.renderer).toEqual({
+      name: "Meter",
+      options: { low: 0.2, high: 0.4, optimum: 1, precision: 0 },
+    });
+    // A plain ratio keeps the Data Browser's default meter.
+    expect(byProperty("battery").meta.renderer).toBeUndefined();
   });
 
   it("drops non-numeric samples of numeric properties", () => {

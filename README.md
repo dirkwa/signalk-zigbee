@@ -103,7 +103,7 @@ camelCase; `humidity` becomes `relativeHumidity` and `linkquality`
 | `environment.inside.saloon.temperature`               | K     |     |
 | `environment.inside.saloon.relativeHumidity`          | ratio |     |
 | `environment.inside.saloon.battery`                   | ratio |     |
-| `environment.inside.saloon.linkQuality`               | lqi   |     |
+| `environment.inside.saloon.linkQuality`               | ratio |     |
 | `environment.inside.saloon.comfortTemperatureMin/Max` | K     | yes |
 | `environment.inside.saloon.comfortHumidityMin/Max`    | ratio | yes |
 | `environment.inside.saloon.temperatureUnits`          |       | yes |
@@ -112,8 +112,12 @@ camelCase; `humidity` becomes `relativeHumidity` and `linkquality`
 
 Units are converted to SI: °C → K, % → ratio, hPa → Pa, mV → V, kWh → J and
 so on. Calibration and offset values are treated as differences (+1 °C is
-+1 K). Units without an SI counterpart (lx, ppm, lqi) pass through unchanged
-and are named in the path metadata. On/off values become `true`/`false`.
++1 K). Link quality (LQI, 0 to 255) becomes a ratio of the best link. The
+Data Browser of Signal K 2.19 and later draws it as a bar that is green from
+about LQI 100, yellow from about 50 and red below; older servers show the
+ratio as a number. Units without an SI counterpart (lx, ppm) pass
+through unchanged and are named in the path metadata. On/off values become
+`true`/`false`.
 Composite and list properties (a light's `color` with its `x`/`y`, a
 schedule, the OTA `update` block) are not mapped; use the Zigbee2MQTT
 interface for those.
