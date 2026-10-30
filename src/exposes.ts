@@ -40,10 +40,17 @@ export interface Z2mDevice {
   } | null;
 }
 
+/** How the Signal K Data Browser draws a path (meta.renderer). */
+export interface PathRenderer {
+  name: string;
+  options?: Record<string, number | boolean>;
+}
+
 export interface PathMeta {
   displayName: string;
   description?: string;
   units?: string;
+  renderer?: PathRenderer;
 }
 
 export interface PathMapping {
@@ -140,6 +147,9 @@ export function devicePath(
     .replaceAll("{ieee}", device.ieee_address.toLowerCase());
 }
 
+/** IEEE 802.15.4 link quality (LQI) runs from 0 to 255. */
+const LQI_MAX = 255;
+
 interface Conversion {
   units?: string;
   scale: number;
@@ -151,6 +161,9 @@ const CONVERSIONS: Record<string, Conversion> = {
   "°C": { units: "K", scale: 1, offset: 273.15 },
   "°F": { units: "K", scale: 5 / 9, offset: 273.15 - (32 * 5) / 9 },
   "%": { units: "ratio", scale: 0.01, offset: 0 },
+  // A bare 0-255 number tells a boat owner nothing; a share of the best
+  // link reads like the battery next to it.
+  lqi: { units: "ratio", scale: 1 / LQI_MAX, offset: 0 },
   Pa: { units: "Pa", scale: 1, offset: 0 },
   hPa: { units: "Pa", scale: 100, offset: 0 },
   kPa: { units: "Pa", scale: 1000, offset: 0 },
@@ -172,6 +185,24 @@ const CONVERSIONS: Record<string, Conversion> = {
   mm: { units: "m", scale: 0.001, offset: 0 },
   cm: { units: "m", scale: 0.01, offset: 0 },
   m: { units: "m", scale: 1, offset: 0 },
+};
+
+/**
+ * The Data Browser draws a ratio as an HTML meter: signalk-server's built-in
+ * "Meter" renderer, which takes its thresholds from meta.renderer.options.
+ * With the optimum at the top the browser paints it green above `high`,
+ * yellow between `low` and `high` and red below `low`. As a rule of thumb a
+ * Zigbee link is solid from about LQI 100 and starts to lose messages below
+ * about 50.
+ */
+const LINK_QUALITY_METER: PathRenderer = {
+  name: "Meter",
+  options: { low: 0.2, high: 0.4, optimum: 1, precision: 0 },
+};
+
+/** Renderers by Zigbee2MQTT unit. */
+const RENDERERS: Record<string, PathRenderer> = {
+  lqi: LINK_QUALITY_METER,
 };
 
 /**
@@ -284,6 +315,9 @@ export function exposeMapping(expose: Expose, basePath: string): PathMapping {
   };
   if (expose.description !== undefined) meta.description = expose.description;
   if (conversion.units !== undefined) meta.units = conversion.units;
+  const renderer =
+    expose.unit !== undefined ? RENDERERS[expose.unit] : undefined;
+  if (renderer !== undefined) meta.renderer = renderer;
   return {
     property,
     path: `${basePath}.${leafName(property)}`,
