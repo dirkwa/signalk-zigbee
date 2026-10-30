@@ -150,12 +150,8 @@ describe("usbCoordinatorProblem", () => {
     );
   });
 
-  it("points at the hardware rescan when only the host sees the stick", () => {
-    const problem = usbCoordinatorProblem(USB, true, false);
-    expect(problem).toMatch(
-      /plugged in, but the Signal K container cannot see it/,
-    );
-    expect(problem).toContain("signalk hardware rescan");
+  it("accepts a stick only the host sees", () => {
+    expect(usbCoordinatorProblem(USB, true, false)).toBeUndefined();
   });
 
   it("names both causes when the host could not be probed", () => {

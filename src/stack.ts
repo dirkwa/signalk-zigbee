@@ -144,10 +144,12 @@ export function z2mEnv(
 /**
  * Why a USB coordinator cannot be handed to Zigbee2MQTT, or undefined.
  *
- * signalk-container checks a device from inside Signal K's own process and
- * drops one it cannot see, so a containerized Signal K needs the stick
- * passed in too; otherwise Zigbee2MQTT would start without its coordinator.
- * `onHost` is the host-side probe (undefined when it could not run).
+ * A stick the host probe found is handed over even when Signal K's own
+ * container cannot see it: signalk-container passes a USB serial device it
+ * cannot see straight from the host. Without the probe, a stick Signal K
+ * cannot see is refused, so Zigbee2MQTT never starts without its
+ * coordinator. `onHost` is the host-side probe (undefined when it could not
+ * run).
  */
 export function usbCoordinatorProblem(
   serialPort: string,
@@ -157,13 +159,10 @@ export function usbCoordinatorProblem(
   if (onHost === false) {
     return `${serialPort} is not plugged in; plug it in and restart the plugin`;
   }
-  if (visibleToSignalK) return undefined;
-  const what =
-    onHost === true
-      ? `${serialPort} is plugged in, but the Signal K container cannot see it`
-      : `${serialPort} is not visible to Signal K (unplugged, or not passed to its container)`;
+  if (onHost === true || visibleToSignalK) return undefined;
   return (
-    `${what}. With the universal installer, run "signalk hardware rescan" ` +
+    `${serialPort} is not visible to Signal K (unplugged, or not passed to its container). ` +
+    `With the universal installer, run "signalk hardware rescan" ` +
     "(it restarts Signal K); otherwise pass the device to the Signal K container."
   );
 }
