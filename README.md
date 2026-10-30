@@ -34,7 +34,10 @@ network; a device is paired to one of them. Networks are not merged.
   `127.0.0.1`.
 - A USB coordinator can be plugged in while Signal K runs, also in a
   containerized Signal K: signalk-container passes the stick from the host
-  to Zigbee2MQTT. Restart the plugin after plugging it in.
+  to Zigbee2MQTT. Restart the plugin after plugging it in. This works for
+  `/dev/serial/by-id/…`, `/dev/serial/by-path/…`, `/dev/ttyUSB*` and
+  `/dev/ttyACM*`; any other name must first be passed to the Signal K
+  container (universal installer: `signalk hardware rescan`).
 
 ## Configuration
 

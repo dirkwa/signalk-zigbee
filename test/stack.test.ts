@@ -152,6 +152,15 @@ describe("usbCoordinatorProblem", () => {
 
   it("accepts a stick only the host sees", () => {
     expect(usbCoordinatorProblem(USB, true, false)).toBeUndefined();
+    expect(usbCoordinatorProblem("/dev/ttyACM0", true, false)).toBeUndefined();
+  });
+
+  it("points at the rescan for a path signalk-container does not pass", () => {
+    const problem = usbCoordinatorProblem("/dev/zigbee", true, false);
+    expect(problem).toMatch(
+      /plugged in, but the Signal K container cannot see it/,
+    );
+    expect(problem).toContain("signalk hardware rescan");
   });
 
   it("names both causes when the host could not be probed", () => {
