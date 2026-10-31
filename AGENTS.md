@@ -54,8 +54,10 @@ coordinator is its own Zigbee network; networks are never merged.
   let the entrypoint `chown -R` the data directory, network keys included.
 - Host networking puts each Zigbee2MQTT web interface on the LAN, so every
   network gets a generated frontend token, kept next to its data.
-- A USB coordinator must also be visible inside the Signal K container. On
-  the universal installer, `signalk hardware rescan` adds it.
+- A USB coordinator need not be visible inside the Signal K container: when
+  the host probe finds it, signalk-container (1.37+) passes it from the host,
+  for the serial paths in `HOST_PASSED_SERIAL_RE` (`src/stack.ts`). Keep that
+  pattern in step with signalk-container's `SERIAL_NODE_PATH_RE`.
 - Start-up is asynchronous and a restart can overlap the previous run: after
   every `await` in the start-up path, check the run's abort signal before
   touching shared state.

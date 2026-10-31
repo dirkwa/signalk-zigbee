@@ -142,12 +142,21 @@ export function z2mEnv(
 }
 
 /**
+ * The serial device paths signalk-container (1.37+) passes from the host when
+ * Signal K's own container cannot see them. It skips any other path it cannot
+ * see, so a stick named another way still has to reach Signal K first.
+ */
+const HOST_PASSED_SERIAL_RE =
+  /^\/dev\/(?:serial\/by-(?:id|path)\/[^/]+|tty(?:USB|ACM)\d+)$/;
+
+/**
  * Why a USB coordinator cannot be handed to Zigbee2MQTT, or undefined.
  *
- * signalk-container checks a device from inside Signal K's own process and
- * drops one it cannot see, so a containerized Signal K needs the stick
- * passed in too; otherwise Zigbee2MQTT would start without its coordinator.
- * `onHost` is the host-side probe (undefined when it could not run).
+ * A stick the host probe found is handed over even when Signal K's own
+ * container cannot see it, as long as signalk-container passes that path from
+ * the host. Otherwise a stick Signal K cannot see is refused, so Zigbee2MQTT
+ * never starts without its coordinator. `onHost` is the host-side probe
+ * (undefined when it could not run).
  */
 export function usbCoordinatorProblem(
   serialPort: string,
@@ -158,13 +167,17 @@ export function usbCoordinatorProblem(
     return `${serialPort} is not plugged in; plug it in and restart the plugin`;
   }
   if (visibleToSignalK) return undefined;
+  if (onHost === true && HOST_PASSED_SERIAL_RE.test(serialPort)) {
+    return undefined;
+  }
   const what =
     onHost === true
       ? `${serialPort} is plugged in, but the Signal K container cannot see it`
       : `${serialPort} is not visible to Signal K (unplugged, or not passed to its container)`;
   return (
-    `${what}. With the universal installer, run "signalk hardware rescan" ` +
-    "(it restarts Signal K); otherwise pass the device to the Signal K container."
+    `${what}. Use its /dev/serial/by-id/… link, or with the universal ` +
+    `installer run "signalk hardware rescan" (it restarts Signal K); ` +
+    "otherwise pass the device to the Signal K container."
   );
 }
 

@@ -150,8 +150,13 @@ describe("usbCoordinatorProblem", () => {
     );
   });
 
-  it("points at the hardware rescan when only the host sees the stick", () => {
-    const problem = usbCoordinatorProblem(USB, true, false);
+  it("accepts a stick only the host sees", () => {
+    expect(usbCoordinatorProblem(USB, true, false)).toBeUndefined();
+    expect(usbCoordinatorProblem("/dev/ttyACM0", true, false)).toBeUndefined();
+  });
+
+  it("points at the rescan for a path signalk-container does not pass", () => {
+    const problem = usbCoordinatorProblem("/dev/zigbee", true, false);
     expect(problem).toMatch(
       /plugged in, but the Signal K container cannot see it/,
     );

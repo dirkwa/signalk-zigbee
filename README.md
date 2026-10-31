@@ -26,17 +26,18 @@ network; a device is paired to one of them. Networks are not merged.
 
 ## Requirements
 
-- Signal K server with [signalk-container](https://www.npmjs.com/package/signalk-container) 1.30 or later
+- Signal K server with [signalk-container](https://www.npmjs.com/package/signalk-container) 1.37 or later
   and rootless Podman or Docker.
 - Signal K running on the host network: bare metal, or the
   [universal installer](https://github.com/dirkwa/signalk-universal-installer)
   container. Mosquitto and Zigbee2MQTT use host networking and are reached on
   `127.0.0.1`.
-- For a USB coordinator in a containerized Signal K: the stick must also be
-  passed to the Signal K container, so signalk-container can verify it.
-  With the universal installer, plug the stick in and run
-  `signalk hardware rescan`. If that step is missing, the network shows an
-  error saying so instead of starting Zigbee2MQTT without its coordinator.
+- A USB coordinator can be plugged in while Signal K runs, also in a
+  containerized Signal K: signalk-container passes the stick from the host
+  to Zigbee2MQTT. Restart the plugin after plugging it in. This works for
+  `/dev/serial/by-id/…`, `/dev/serial/by-path/…`, `/dev/ttyUSB*` and
+  `/dev/ttyACM*`; any other name must first be passed to the Signal K
+  container (universal installer: `signalk hardware rescan`).
 
 ## Configuration
 

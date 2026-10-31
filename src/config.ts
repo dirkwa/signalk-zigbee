@@ -247,10 +247,7 @@ export const CONFIG_SCHEMA = {
             type: "string",
             title: "Serial port (USB)",
             description:
-              "Prefer the /dev/serial/by-id/… link, it survives replugging. " +
-              "When Signal K runs in a container the stick must also be " +
-              "passed to that container (universal installer: signalk " +
-              "hardware rescan).",
+              "Prefer the /dev/serial/by-id/… link, it survives replugging.",
           },
           adapter: {
             type: "string",
