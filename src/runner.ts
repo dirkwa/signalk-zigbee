@@ -13,7 +13,10 @@ import {
   resolveMount,
   startSafely,
   waitForContainerManager,
+  watchHostDevice,
   type ContainerManagerApi,
+  type DeviceWatchEvent,
+  type HostDeviceWatch,
   type HostMount,
   type StopOptions,
 } from "signalk-container-helper";
@@ -43,6 +46,10 @@ import {
   type CoordinatorAccess,
 } from "./stack.js";
 
+function unpluggedMessage(serialPort: string): string {
+  return `${serialPort} is unplugged; Zigbee2MQTT starts when it is plugged in`;
+}
+
 /** Group owning USB serial nodes on Debian-family hosts. */
 const SERIAL_GROUP = "dialout";
 const MANAGER_TIMEOUT_MS = 120_000;
@@ -59,6 +66,8 @@ interface NetworkRun {
   serialPort?: string;
   /** Token for the Zigbee2MQTT web interface. */
   frontendToken?: string;
+  /** USB networks: follows the stick being unplugged and plugged back in. */
+  watch?: HostDeviceWatch;
 }
 
 export interface NetworkReport {
@@ -112,6 +121,7 @@ export class ZigbeeRunner {
     // start-up can never pass its own checks.
     this.abort?.abort();
     this.abort = undefined;
+    for (const run of this.runs.values()) void run.watch?.stop();
     this.running = true;
     this.settings = settings;
     this.runs = new Map(
@@ -150,6 +160,10 @@ export class ZigbeeRunner {
     this.running = false;
     this.abort?.abort();
     this.abort = undefined;
+    for (const run of this.runs.values()) {
+      await run.watch?.stop();
+      run.watch = undefined;
+    }
     this.discovery?.stop();
     this.discovery = undefined;
     await this.bridge?.stop();
@@ -375,9 +389,14 @@ export class ZigbeeRunner {
       onHost,
       existsSync(net.serialPort),
     );
-    if (problem !== undefined) {
+    if (problem !== undefined && onHost !== false) {
       this.app.error(`${net.id}: ${problem}`);
       this.setPhase(net.id, "error", problem);
+      return;
+    }
+    this.watchStick(net, onHost === false, signal);
+    if (onHost === false) {
+      this.setPhase(net.id, "waiting", unpluggedMessage(net.serialPort));
       return;
     }
     await this.startNetwork(
@@ -389,6 +408,69 @@ export class ZigbeeRunner {
       },
       signal,
     );
+  }
+
+  /**
+   * Zigbee2MQTT exits when its stick is pulled and the runtime restarts it
+   * against a node that is gone; a stick plugged back in may get another
+   * node, which the old container never sees. So the container is stopped
+   * while the stick is out and recreated when it is back, or when it stays
+   * offline with the stick plugged in.
+   */
+  private watchStick(
+    net: NetworkConfig,
+    absent: boolean,
+    signal: AbortSignal,
+  ): void {
+    const run = this.runs.get(net.id);
+    if (run === undefined || run.watch !== undefined || !this.manager) return;
+    run.watch = watchHostDevice({
+      manager: this.manager,
+      path: net.serialPort,
+      initiallyAbsent: absent,
+      isStarted: () => run.container !== undefined,
+      isHealthy: () =>
+        this.bridge?.isConnected === true
+          ? this.bridge.status().find((s) => s.id === net.id)?.online === true
+          : undefined,
+      onEvent: (event) => this.onStickEvent(run, event, signal),
+      debug: (msg) => {
+        this.app.debug(msg);
+      },
+    });
+  }
+
+  private async onStickEvent(
+    run: NetworkRun,
+    event: DeviceWatchEvent,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (signal.aborted) return;
+    const { net } = run;
+    if (event === "unplugged") {
+      this.setPhase(net.id, "waiting", unpluggedMessage(net.serialPort));
+      await this.manager?.stop(z2mContainerName(net.id));
+      return;
+    }
+    const container = run.container;
+    if (container === undefined) {
+      await this.startUsbNetwork(net, signal);
+      return;
+    }
+    this.setPhase(net.id, "starting", "restarting Zigbee2MQTT");
+    try {
+      // A recreate, not a start: the stick may have come back as another
+      // device node, which only a new container is given.
+      await container.applyUpdate(
+        container.lastStartedTag ?? z2mImage(net).tag,
+        { signal },
+      );
+      if (signal.aborted) return;
+      this.setPhase(net.id, "running");
+    } catch (err) {
+      if (signal.aborted) return;
+      this.setPhase(net.id, "error", errMsg(err));
+    }
   }
 
   private onDiscoveryChange(): void {
