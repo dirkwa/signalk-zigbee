@@ -497,11 +497,28 @@
             el(
               "p",
               { class: "muted" },
-              "No network configured. Add one under Server → Plugin Config → Zigbee.",
+              "No network configured. Plug in a Zigbee USB stick and it is set up on its own, or add a network under Server → Plugin Config → Zigbee.",
             ),
           );
         }
         nodes.push(...status.networks.map(network));
+        if (status.usbSticks?.length) {
+          nodes.push(
+            el(
+              "section",
+              {},
+              el("h2", {}, "Zigbee USB sticks found"),
+              el(
+                "p",
+                { class: "muted" },
+                "Add a network under Server → Plugin Config → Zigbee with the serial port and driver of the stick to use.",
+              ),
+              ...status.usbSticks.map((s) =>
+                el("p", {}, `${s.serialPort} — driver ${s.adapter}`),
+              ),
+            ),
+          );
+        }
         if (status.discovered.length) {
           nodes.push(
             el(

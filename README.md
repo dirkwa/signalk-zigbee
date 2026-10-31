@@ -44,7 +44,18 @@ network; a device is paired to one of them. Networks are not merged.
 
 ## Configuration
 
-Server → Plugin Config → Zigbee (Zigbee2MQTT). Add one entry under
+**A single USB stick needs no configuration.** While no network is
+configured, the plugin looks for a known Zigbee coordinator among the
+host's `/dev/serial/by-id` devices about once a minute. When it finds
+exactly one, it saves it as the network `main` with the matching adapter
+driver and starts it. Recognised are, among others, the Sonoff ZBDongle-P,
+-E and Dongle Max/Plus/Lite, ConBee II and III, Home Assistant SkyConnect
+and Connect ZBT-1/ZBT-2, SMLIGHT SLZB-06/07, ZiGate and TI CC2531/CC2652
+sticks. With several sticks plugged in, the web app lists them and you add
+the one to use. A containerized Signal K needs signalk-container 1.37.2 or
+later for this.
+
+Otherwise: Server → Plugin Config → Zigbee (Zigbee2MQTT). Add one entry under
 **Zigbee networks** per coordinator:
 
 | Field              | USB                                     | espOS                                         |
