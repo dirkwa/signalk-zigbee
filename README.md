@@ -36,7 +36,8 @@ network; a device is paired to one of them. Networks are not merged.
   containerized Signal K: signalk-container passes the stick from the host
   to Zigbee2MQTT. The plugin notices a stick plugged in or pulled out within
   a minute or two: it stops Zigbee2MQTT while the stick is out and starts it
-  again when it is back, with no plugin restart. This works for
+  again when it is back, with no plugin restart (in a containerized Signal K,
+  noticing a pulled stick needs signalk-container 1.37.3). This works for
   `/dev/serial/by-id/…`, `/dev/serial/by-path/…`, `/dev/ttyUSB*` and
   `/dev/ttyACM*`; any other name must first be passed to the Signal K
   container (universal installer: `signalk hardware rescan`).
