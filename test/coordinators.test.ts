@@ -68,6 +68,14 @@ describe("findSticks", () => {
     ]);
   });
 
+  // deCONZ runs the original ConBee at 38400, not the default 115200.
+  it("gives an original ConBee its serial speed", () => {
+    const serialPort = `${BY_ID}usb-dresden_elektronik_ingenieurtechnik_GmbH_ConBee_DE1234567-if00-port0`;
+    expect(findSticks([serialPort])).toEqual([
+      { serialPort, adapter: "deconz", baudrate: 38400 },
+    ]);
+  });
+
   it("finds nothing among other serial devices", () => {
     expect(findSticks([`${BY_ID}usb-FTDI_GPS-if00-port0`])).toEqual([]);
   });

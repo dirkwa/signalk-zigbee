@@ -13,11 +13,17 @@ import type { Adapter } from "./config.js";
 interface Pattern {
   re: RegExp;
   adapter: Adapter;
+  /** Serial speed, where the stick does not run at the default 115200. */
+  baudrate?: number;
 }
+
+/** deCONZ runs the original ConBee at 38400; ConBee II and III at 115200. */
+const CONBEE_BAUDRATE = 38_400;
 
 /** First match wins: the specific Sonoff names come before the generic one. */
 const PATTERNS: readonly Pattern[] = [
-  { re: /conbee/i, adapter: "deconz" },
+  { re: /conbee_iii?_/i, adapter: "deconz" },
+  { re: /conbee/i, adapter: "deconz", baudrate: CONBEE_BAUDRATE },
   { re: /zigate/i, adapter: "zigate" },
   { re: /zephyr_zigbee_ncp/i, adapter: "zboss" },
   { re: /nabu_casa_(skyconnect|.*zbt-[12])/i, adapter: "ember" },
@@ -34,20 +40,31 @@ const PATTERNS: readonly Pattern[] = [
 
 /** The adapter driver for a known coordinator, or undefined. */
 export function identifyCoordinator(byIdPath: string): Adapter | undefined {
+  return matchCoordinator(byIdPath)?.adapter;
+}
+
+function matchCoordinator(byIdPath: string): Pattern | undefined {
   const name = byIdPath.slice(byIdPath.lastIndexOf("/") + 1);
-  return PATTERNS.find((p) => p.re.test(name))?.adapter;
+  return PATTERNS.find((p) => p.re.test(name));
 }
 
 /** A Zigbee coordinator stick found on the host. */
 export interface UsbStick {
   serialPort: string;
   adapter: Adapter;
+  baudrate?: number;
 }
 
 /** The known coordinators among the host's serial device paths. */
 export function findSticks(paths: readonly string[]): UsbStick[] {
   return paths.flatMap((serialPort) => {
-    const adapter = identifyCoordinator(serialPort);
-    return adapter === undefined ? [] : [{ serialPort, adapter }];
+    const match = matchCoordinator(serialPort);
+    if (match === undefined) return [];
+    const { adapter, baudrate } = match;
+    return [
+      baudrate === undefined
+        ? { serialPort, adapter }
+        : { serialPort, adapter, baudrate },
+    ];
   });
 }
