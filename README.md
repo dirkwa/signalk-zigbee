@@ -55,6 +55,11 @@ sticks. With several sticks plugged in, the web app lists them and you add
 the one to use. A containerized Signal K needs signalk-container 1.37.2 or
 later for this.
 
+An original ConBee (before ConBee II) may show up only under a generic FTDI
+name such as `usb-FTDI_FT230X_Basic_UART_…`, which other serial adapters
+share, so it is not set up on its own. Add it by hand with adapter driver
+`deconz` and baud rate 38400.
+
 Otherwise: Server → Plugin Config → Zigbee (Zigbee2MQTT). Add one entry under
 **Zigbee networks** per coordinator:
 
