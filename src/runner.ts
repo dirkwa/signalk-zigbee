@@ -510,9 +510,11 @@ export class ZigbeeRunner {
     // this run connected to the broker and began mDNS discovery.
     this.discovery?.stop();
     this.discovery = undefined;
-    await this.bridge?.stop();
-    this.bridge = undefined;
+    const bridge = this.bridge;
+    await bridge?.stop();
+    // A start() during the await owns this.bridge now, maybe with a new one.
     if (signal.aborted) return true;
+    if (this.bridge === bridge) this.bridge = undefined;
     this.start(adopted);
     return true;
   }
