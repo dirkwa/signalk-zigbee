@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { ServerAPI } from "@signalk/server-api";
 import {
   errMsg,
+  listHostSerialDevices,
   ManagedContainer,
   probeHostDevice,
   resolveMount,
@@ -23,6 +24,7 @@ import {
 } from "signalk-container-helper";
 import { ZigbeeBridge, type NetworkStatus } from "./bridge.js";
 import {
+  applyDefaults,
   baseTopic,
   MOSQUITTO_IMAGE,
   PLUGIN_ID,
@@ -31,6 +33,7 @@ import {
   type NetworkConfig,
   type Settings,
 } from "./config.js";
+import { findSticks, type UsbStick } from "./coordinators.js";
 import { CoordinatorDiscovery, type Coordinator } from "./discovery.js";
 import {
   COORDINATOR_DEVICE,
@@ -56,6 +59,11 @@ const SERIAL_GROUP = "dialout";
 const MANAGER_TIMEOUT_MS = 120_000;
 const STOP_ATTEMPTS = 3;
 const STOP_RETRY_MS = 10_000;
+/**
+ * How often to look for a Zigbee stick while no network is configured. Each
+ * look starts a short-lived container under a containerized Signal K.
+ */
+const STICK_SEARCH_INTERVAL_MS = 60_000;
 
 export type NetworkPhase =
   "starting" | "running" | "waiting" | "error" | "disabled";
@@ -97,6 +105,11 @@ export interface StatusReport {
   networks: NetworkReport[];
   /** espOS coordinators seen on mDNS that no network uses yet. */
   discovered: Coordinator[];
+  /**
+   * Zigbee sticks plugged into the host, listed while no network is
+   * configured. A single one becomes the "main" network on its own.
+   */
+  usbSticks: UsbStick[];
 }
 
 export class ZigbeeRunner {
@@ -114,6 +127,8 @@ export class ZigbeeRunner {
   /** Serializes broker config writes, which cannot be cancelled once begun. */
   private configWrite: Promise<void> = Promise.resolve();
   private running = false;
+  private usbSticks: UsbStick[] = [];
+  private stickSearch: ReturnType<typeof setInterval> | undefined;
 
   constructor(private readonly app: ServerAPI) {}
 
@@ -131,6 +146,9 @@ export class ZigbeeRunner {
     const settled = Promise.all(
       [...this.runs.values()].map((run) => run.watch?.stop()),
     );
+    clearInterval(this.stickSearch);
+    this.stickSearch = undefined;
+    this.usbSticks = [];
     this.running = true;
     this.settings = settings;
     this.runs = new Map(
@@ -171,6 +189,8 @@ export class ZigbeeRunner {
     this.running = false;
     this.abort?.abort();
     this.abort = undefined;
+    clearInterval(this.stickSearch);
+    this.stickSearch = undefined;
     for (const run of this.runs.values()) {
       await run.watch?.stop();
       run.watch = undefined;
@@ -216,6 +236,7 @@ export class ZigbeeRunner {
       discovered: (this.discovery?.list() ?? []).filter(
         (c) => !used.includes(`tcp://${c.address}:${c.port}`),
       ),
+      usbSticks: this.usbSticks,
     };
   }
 
@@ -269,6 +290,19 @@ export class ZigbeeRunner {
       throw new Error("signalk-container found no podman or docker");
     }
     this.manager = manager;
+
+    if (settings.networks.length === 0) {
+      if (await this.adoptStick(settings, signal)) return;
+      if (signal.aborted) return;
+      let searching = false;
+      this.stickSearch = setInterval(() => {
+        if (searching || signal.aborted) return;
+        searching = true;
+        void this.adoptStick(settings, signal).finally(() => {
+          searching = false;
+        });
+      }, STICK_SEARCH_INTERVAL_MS);
+    }
 
     this.progress("Preparing the data directory");
     const hostDir = this.app.getDataDirPath();
@@ -422,6 +456,67 @@ export class ZigbeeRunner {
       },
       signal,
     );
+  }
+
+  /**
+   * With no network configured, a single Zigbee stick on the host becomes the
+   * "main" network: saved to the plugin configuration, then started. Several
+   * sticks are only listed, for the user to choose. Returns true when the
+   * plugin restarted with the new network.
+   */
+  private async adoptStick(
+    settings: Settings,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (this.manager === undefined) return false;
+    let paths: string[] | null;
+    try {
+      paths = await listHostSerialDevices(this.manager);
+    } catch (err) {
+      this.app.debug(`listing USB serial devices failed: ${errMsg(err)}`);
+      return false;
+    }
+    if (signal.aborted || paths === null) return false;
+    this.usbSticks = findSticks(paths);
+    const [stick] = this.usbSticks;
+    if (stick === undefined || this.usbSticks.length > 1) {
+      this.report();
+      return false;
+    }
+    const adopted = applyDefaults({
+      ...settings,
+      networks: [{ id: "main", coordinator: "usb", ...stick }],
+    });
+    // Unsaved, the network would vanish from the plugin settings and the next
+    // start would set it up again; the search retries the save instead.
+    const saved = await new Promise<void>((resolve, reject) => {
+      this.app.savePluginOptions(adopted, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    }).then(
+      () => true,
+      (err: unknown) => {
+        this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
+        return false;
+      },
+    );
+    if (!saved) return false;
+    if (signal.aborted) return true;
+    this.app.debug(
+      `using Zigbee stick ${stick.serialPort} (${stick.adapter}) as network main`,
+    );
+    // start() expects stop() to have run: the search may find the stick after
+    // this run connected to the broker and began mDNS discovery.
+    this.discovery?.stop();
+    this.discovery = undefined;
+    const bridge = this.bridge;
+    await bridge?.stop();
+    // A start() during the await owns this.bridge now, maybe with a new one.
+    if (signal.aborted) return true;
+    if (this.bridge === bridge) this.bridge = undefined;
+    this.start(adopted);
+    return true;
   }
 
   /**
@@ -657,7 +752,16 @@ export class ZigbeeRunner {
           .join(", ")}`,
       );
     }
-    const line = parts.join(" · ") || "Broker running";
+    if (status.usbSticks.length > 1) {
+      parts.push(
+        `${String(status.usbSticks.length)} Zigbee sticks found; add the one to use under Plugin Config`,
+      );
+    }
+    const line =
+      parts.join(" · ") ||
+      (status.networks.length === 0
+        ? "Waiting for a Zigbee stick or a network in Plugin Config"
+        : "Broker running");
     if (errors.length > 0) {
       this.app.setPluginError(line);
     } else {
