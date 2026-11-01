@@ -5,6 +5,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ServerAPI } from "@signalk/server-api";
 import {
   errMsg,
@@ -53,6 +54,8 @@ function unpluggedMessage(serialPort: string): string {
 /** Group owning USB serial nodes on Debian-family hosts. */
 const SERIAL_GROUP = "dialout";
 const MANAGER_TIMEOUT_MS = 120_000;
+const STOP_ATTEMPTS = 3;
+const STOP_RETRY_MS = 10_000;
 
 export type NetworkPhase =
   "starting" | "running" | "waiting" | "error" | "disabled";
@@ -392,6 +395,9 @@ export class ZigbeeRunner {
     if (problem !== undefined && onHost !== false) {
       this.app.error(`${net.id}: ${problem}`);
       this.setPhase(net.id, "error", problem);
+      // Watched as absent, so the network is tried again once the host
+      // probe reports the stick, say after it is plugged in.
+      this.watchStick(net, true, signal);
       return;
     }
     this.watchStick(net, onHost === false, signal);
@@ -448,8 +454,7 @@ export class ZigbeeRunner {
     if (signal.aborted) return;
     const { net } = run;
     if (event === "unplugged") {
-      this.setPhase(net.id, "waiting", unpluggedMessage(net.serialPort));
-      await this.manager?.stop(z2mContainerName(net.id));
+      await this.stopWhileUnplugged(net, signal);
       return;
     }
     const container = run.container;
@@ -470,6 +475,38 @@ export class ZigbeeRunner {
     } catch (err) {
       if (signal.aborted) return;
       this.setPhase(net.id, "error", errMsg(err));
+    }
+  }
+
+  /**
+   * The watch reports `unplugged` once, so a failed stop is retried here: a
+   * container left running would loop on a node that is gone while the
+   * network reads "waiting".
+   */
+  private async stopWhileUnplugged(
+    net: NetworkConfig,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const name = z2mContainerName(net.id);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.manager?.stop(name);
+        this.setPhase(net.id, "waiting", unpluggedMessage(net.serialPort));
+        return;
+      } catch (err) {
+        if (signal.aborted) return;
+        this.app.error(`could not stop ${name}: ${errMsg(err)}`);
+        if (attempt === STOP_ATTEMPTS) {
+          this.setPhase(
+            net.id,
+            "error",
+            `${net.serialPort} is unplugged, but Zigbee2MQTT could not be stopped: ${errMsg(err)}`,
+          );
+          return;
+        }
+      }
+      await delay(STOP_RETRY_MS, undefined, { signal }).catch(() => undefined);
+      if (signal.aborted) return;
     }
   }
 
