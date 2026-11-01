@@ -73,8 +73,6 @@ interface NetworkRun {
   watch?: HostDeviceWatch;
   /** The container's first start, which an unplug stop must not overtake. */
   starting?: Promise<unknown>;
-  /** The stick event being handled; stop() lets it finish. */
-  handling?: Promise<void>;
 }
 
 export interface NetworkReport {
@@ -131,10 +129,7 @@ export class ZigbeeRunner {
     // The previous run's stick handler may still be stopping its container;
     // this run's container must not start before it is done.
     const settled = Promise.all(
-      [...this.runs.values()].map(async (run) => {
-        await run.watch?.stop();
-        await run.handling?.catch(() => undefined);
-      }),
+      [...this.runs.values()].map((run) => run.watch?.stop()),
     );
     this.running = true;
     this.settings = settings;
@@ -178,9 +173,6 @@ export class ZigbeeRunner {
     this.abort = undefined;
     for (const run of this.runs.values()) {
       await run.watch?.stop();
-      // watch.stop() skips the wait while a handler runs, so a late unplug
-      // stop could otherwise hit the next run's container.
-      await run.handling?.catch(() => undefined);
       run.watch = undefined;
     }
     this.discovery?.stop();
@@ -455,13 +447,7 @@ export class ZigbeeRunner {
         this.bridge?.isConnected === true
           ? this.bridge.status().find((s) => s.id === net.id)?.online === true
           : undefined,
-      onEvent: (event) => {
-        const handling = this.onStickEvent(run, event, signal).finally(() => {
-          if (run.handling === handling) run.handling = undefined;
-        });
-        run.handling = handling;
-        return handling;
-      },
+      onEvent: (event) => this.onStickEvent(run, event, signal),
       debug: (msg) => {
         this.app.debug(msg);
       },
