@@ -497,7 +497,9 @@
             el(
               "p",
               { class: "muted" },
-              "No network configured. Plug in a Zigbee USB stick and it is set up on its own, or add a network under Server → Plugin Config → Zigbee.",
+              (status.usbSticks?.length ?? 0) > 1
+                ? "No network configured. Several Zigbee USB sticks are plugged in, so none is set up on its own; choose one below."
+                : "No network configured. Plug in a Zigbee USB stick and it is set up on its own, or add a network under Server → Plugin Config → Zigbee.",
             ),
           );
         }
