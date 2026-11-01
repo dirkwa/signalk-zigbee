@@ -73,6 +73,8 @@ interface NetworkRun {
   watch?: HostDeviceWatch;
   /** The container's first start, which an unplug stop must not overtake. */
   starting?: Promise<unknown>;
+  /** The stick event being handled; stop() lets it finish. */
+  handling?: Promise<void>;
 }
 
 export interface NetworkReport {
@@ -126,7 +128,14 @@ export class ZigbeeRunner {
     // start-up can never pass its own checks.
     this.abort?.abort();
     this.abort = undefined;
-    for (const run of this.runs.values()) void run.watch?.stop();
+    // The previous run's stick handler may still be stopping its container;
+    // this run's container must not start before it is done.
+    const settled = Promise.all(
+      [...this.runs.values()].map(async (run) => {
+        await run.watch?.stop();
+        await run.handling?.catch(() => undefined);
+      }),
+    );
     this.running = true;
     this.settings = settings;
     this.runs = new Map(
@@ -150,14 +159,16 @@ export class ZigbeeRunner {
     // this run must not wait behind them.
     this.esposChain = Promise.resolve();
     startSafely(this.app, () =>
-      this.bringUp(settings, abort.signal).catch((err: unknown) => {
-        // startSafely only sets the status line, which needs an admin login
-        // to read; keep a trace in the server log as well.
-        if (!abort.signal.aborted) {
-          this.app.error(`start-up failed: ${errMsg(err)}`);
-        }
-        throw err;
-      }),
+      settled
+        .then(() => this.bringUp(settings, abort.signal))
+        .catch((err: unknown) => {
+          // startSafely only sets the status line, which needs an admin login
+          // to read; keep a trace in the server log as well.
+          if (!abort.signal.aborted) {
+            this.app.error(`start-up failed: ${errMsg(err)}`);
+          }
+          throw err;
+        }),
     );
   }
 
@@ -167,6 +178,9 @@ export class ZigbeeRunner {
     this.abort = undefined;
     for (const run of this.runs.values()) {
       await run.watch?.stop();
+      // watch.stop() skips the wait while a handler runs, so a late unplug
+      // stop could otherwise hit the next run's container.
+      await run.handling?.catch(() => undefined);
       run.watch = undefined;
     }
     this.discovery?.stop();
@@ -441,7 +455,13 @@ export class ZigbeeRunner {
         this.bridge?.isConnected === true
           ? this.bridge.status().find((s) => s.id === net.id)?.online === true
           : undefined,
-      onEvent: (event) => this.onStickEvent(run, event, signal),
+      onEvent: (event) => {
+        const handling = this.onStickEvent(run, event, signal).finally(() => {
+          if (run.handling === handling) run.handling = undefined;
+        });
+        run.handling = handling;
+        return handling;
+      },
       debug: (msg) => {
         this.app.debug(msg);
       },
