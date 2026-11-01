@@ -71,6 +71,8 @@ interface NetworkRun {
   frontendToken?: string;
   /** USB networks: follows the stick being unplugged and plugged back in. */
   watch?: HostDeviceWatch;
+  /** The container's first start, which an unplug stop must not overtake. */
+  starting?: Promise<unknown>;
 }
 
 export interface NetworkReport {
@@ -454,7 +456,7 @@ export class ZigbeeRunner {
     if (signal.aborted) return;
     const { net } = run;
     if (event === "unplugged") {
-      await this.stopWhileUnplugged(net, signal);
+      await this.stopWhileUnplugged(run, signal);
       return;
     }
     const container = run.container;
@@ -484,13 +486,19 @@ export class ZigbeeRunner {
    * network reads "waiting".
    */
   private async stopWhileUnplugged(
-    net: NetworkConfig,
+    run: NetworkRun,
     signal: AbortSignal,
   ): Promise<void> {
+    const { net } = run;
     const name = z2mContainerName(net.id);
+    // A start still in flight would bring the container back after the stop,
+    // so it settles first; its own outcome is reported by startNetwork.
+    await run.starting?.catch(() => undefined);
+    if (signal.aborted) return;
     for (let attempt = 1; ; attempt++) {
       try {
         await this.manager?.stop(name);
+        if (signal.aborted) return;
         this.setPhase(net.id, "waiting", unpluggedMessage(net.serialPort));
         return;
       } catch (err) {
@@ -594,7 +602,8 @@ export class ZigbeeRunner {
         quiet: true,
       });
       run.serialPort = access.serialPort;
-      await run.container.start(tag, { signal });
+      run.starting = run.container.start(tag, { signal });
+      await run.starting;
       if (signal.aborted) return;
       this.setPhase(net.id, "running");
     } catch (err) {
