@@ -487,18 +487,32 @@ export class ZigbeeRunner {
       ...settings,
       networks: [{ id: "main", coordinator: "usb", ...stick }],
     });
-    await new Promise<void>((resolve, reject) => {
+    // Unsaved, the network would vanish from the plugin settings and the next
+    // start would set it up again; the search retries the save instead.
+    const saved = await new Promise<void>((resolve, reject) => {
       this.app.savePluginOptions(adopted, (err) => {
         if (err) reject(err);
         else resolve();
       });
-    }).catch((err: unknown) => {
-      this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
-    });
+    }).then(
+      () => true,
+      (err: unknown) => {
+        this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
+        return false;
+      },
+    );
+    if (!saved) return false;
     if (signal.aborted) return true;
     this.app.debug(
       `using Zigbee stick ${stick.serialPort} (${stick.adapter}) as network main`,
     );
+    // start() expects stop() to have run: the search may find the stick after
+    // this run connected to the broker and began mDNS discovery.
+    this.discovery?.stop();
+    this.discovery = undefined;
+    await this.bridge?.stop();
+    this.bridge = undefined;
+    if (signal.aborted) return true;
     this.start(adopted);
     return true;
   }
