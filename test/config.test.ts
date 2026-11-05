@@ -86,6 +86,9 @@ describe("isSerialDirectory", () => {
       "/dev/serial/by-id",
       "/dev/serial/by-id/",
       "/dev/serial/by-path/",
+      "/dev/serial/by-id/.",
+      "/dev/serial//by-id",
+      "/dev/serial/by-id/x/..",
     ]) {
       expect(isSerialDirectory(path)).toBe(true);
     }
@@ -138,6 +141,7 @@ describe("validate", () => {
       "/dev/serial/by-id/",
       "/dev/serial/by-path",
       "/dev/serial",
+      "/dev/serial/by-id/.",
     ]) {
       expect(
         validate(applyDefaults({ networks: [{ id: "main", serialPort }] })),

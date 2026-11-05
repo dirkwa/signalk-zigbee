@@ -7,6 +7,8 @@
  * frontend port. They are never merged.
  */
 
+import { posix } from "node:path";
+
 export const PLUGIN_ID = "signalk-zigbee";
 
 export const MOSQUITTO_IMAGE = "eclipse-mosquitto";
@@ -177,7 +179,8 @@ const SERIAL_DIRECTORY_PATTERN = /^\/dev\/serial(?:\/by-(?:id|path))?\/?$/;
 
 /** True for a udev link directory rather than a stick's link inside it. */
 export function isSerialDirectory(serialPort: string): boolean {
-  return SERIAL_DIRECTORY_PATTERN.test(serialPort);
+  // Normalized, so "/dev/serial/by-id/." or "/dev/serial//by-id" match too.
+  return SERIAL_DIRECTORY_PATTERN.test(posix.normalize(serialPort));
 }
 
 /** Problems that make the configuration unusable, one sentence each. */
