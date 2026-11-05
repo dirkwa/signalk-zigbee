@@ -6,6 +6,7 @@ import { applyDefaults } from "../src/config.js";
 import {
   ensureZ2mFiles,
   initialZ2mConfig,
+  isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
   usbCoordinatorProblem,
@@ -134,6 +135,21 @@ describe("zigbee2mqtt", () => {
     expect(await ensureZ2mFiles(dir, usbNet!)).toEqual(first);
     const other = await ensureZ2mFiles(dir, esposNet!);
     expect(other.frontendToken).not.toBe(first.frontendToken);
+  });
+});
+
+describe("isCharacterDevice", () => {
+  it.skipIf(process.platform === "win32")("accepts a device node", () => {
+    expect(isCharacterDevice("/dev/null")).toBe(true);
+  });
+
+  it("refuses a directory, a plain file and a missing path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "zigbee-chardev-"));
+    const file = join(dir, "stick");
+    writeFileSync(file, "");
+    expect(isCharacterDevice(dir)).toBe(false);
+    expect(isCharacterDevice(file)).toBe(false);
+    expect(isCharacterDevice(join(dir, "missing"))).toBe(false);
   });
 });
 

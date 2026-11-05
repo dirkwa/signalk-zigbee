@@ -4,7 +4,6 @@
  * configured.
  */
 
-import { statSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ServerAPI } from "@signalk/server-api";
 import {
@@ -46,21 +45,13 @@ import {
   z2mContainer,
   z2mContainerName,
   Z2M_CONTAINER_PREFIX,
+  isCharacterDevice,
   usbCoordinatorProblem,
   type CoordinatorAccess,
 } from "./stack.js";
 
 function unpluggedMessage(serialPort: string): string {
   return `${serialPort} is unplugged; Zigbee2MQTT starts when it is plugged in`;
-}
-
-/** True for a device node, so a directory or a plain file is not a stick. */
-function isCharacterDevice(path: string): boolean {
-  try {
-    return statSync(path).isCharacterDevice();
-  } catch {
-    return false;
-  }
 }
 
 /** Group owning USB serial nodes on Debian-family hosts. */
