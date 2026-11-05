@@ -175,6 +175,11 @@ export function baseTopic(networkId: string): string {
 /** The udev link directories, an easy pick for the stick itself. */
 const SERIAL_DIRECTORY_PATTERN = /^\/dev\/serial(?:\/by-(?:id|path))?\/?$/;
 
+/** True for a udev link directory rather than a stick's link inside it. */
+export function isSerialDirectory(serialPort: string): boolean {
+  return SERIAL_DIRECTORY_PATTERN.test(serialPort);
+}
+
 /** Problems that make the configuration unusable, one sentence each. */
 export function validate(settings: Settings): string[] {
   const problems: string[] = [];
@@ -203,10 +208,7 @@ export function validate(settings: Settings): string[] {
       problems.push(
         `Network "${net.id}" needs the serial port of its USB coordinator.`,
       );
-    } else if (
-      net.coordinator === "usb" &&
-      SERIAL_DIRECTORY_PATTERN.test(net.serialPort)
-    ) {
+    } else if (net.coordinator === "usb" && isSerialDirectory(net.serialPort)) {
       problems.push(
         `Network "${net.id}": ${net.serialPort} is a directory; choose the ` +
           "stick's link inside it.",

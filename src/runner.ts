@@ -25,6 +25,7 @@ import { ZigbeeBridge, type NetworkStatus } from "./bridge.js";
 import {
   applyDefaults,
   baseTopic,
+  isSerialDirectory,
   MOSQUITTO_IMAGE,
   PLUGIN_ID,
   validate,
@@ -32,7 +33,7 @@ import {
   type NetworkConfig,
   type Settings,
 } from "./config.js";
-import { findSticks, type UsbStick } from "./coordinators.js";
+import { describeSticks, findSticks, type UsbStick } from "./coordinators.js";
 import { CoordinatorDiscovery, type Coordinator } from "./discovery.js";
 import {
   COORDINATOR_DEVICE,
@@ -161,6 +162,17 @@ export class ZigbeeRunner {
     if (this.problems.length > 0) {
       this.app.setPluginError(this.problems.join(" "));
       this.app.debug(`not starting: ${this.problems.join(" ")}`);
+      const pickedDirectory = settings.networks.some(
+        (net) =>
+          net.enabled &&
+          net.coordinator === "usb" &&
+          isSerialDirectory(net.serialPort),
+      );
+      if (pickedDirectory) {
+        const abort = new AbortController();
+        this.abort = abort;
+        void this.offerSticks(abort.signal);
+      }
       return;
     }
     if (settings.networks.every((net) => !net.enabled)) {
@@ -455,6 +467,34 @@ export class ZigbeeRunner {
         groupAdd: groups,
       },
       signal,
+    );
+  }
+
+  /**
+   * Lists the host's Zigbee sticks next to a configuration problem, so a user
+   * who chose the by-id directory sees which link inside it to pick.
+   */
+  private async offerSticks(signal: AbortSignal): Promise<void> {
+    let sticks: UsbStick[];
+    try {
+      const { manager } = await waitForContainerManager({
+        timeoutMs: MANAGER_TIMEOUT_MS,
+        signal,
+      });
+      if (signal.aborted || manager === undefined) return;
+      const paths = await listHostSerialDevices(manager);
+      if (signal.aborted || paths === null) return;
+      sticks = findSticks(paths);
+    } catch (err) {
+      if (!signal.aborted) {
+        this.app.debug(`listing USB serial devices failed: ${errMsg(err)}`);
+      }
+      return;
+    }
+    if (sticks.length === 0) return;
+    this.usbSticks = sticks;
+    this.app.setPluginError(
+      `${this.problems.join(" ")} Zigbee sticks found: ${describeSticks(sticks)}.`,
     );
   }
 

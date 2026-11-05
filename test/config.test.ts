@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyDefaults,
+  isSerialDirectory,
   validate,
   Z2M_ESPOS_IMAGE,
   Z2M_OFFICIAL_DEFAULT_TAG,
@@ -74,6 +75,27 @@ describe("z2mImage", () => {
       image: Z2M_OFFICIAL_IMAGE,
       tag: Z2M_OFFICIAL_DEFAULT_TAG,
     });
+  });
+});
+
+describe("isSerialDirectory", () => {
+  it("matches the udev link directories only", () => {
+    for (const path of [
+      "/dev/serial",
+      "/dev/serial/",
+      "/dev/serial/by-id",
+      "/dev/serial/by-id/",
+      "/dev/serial/by-path/",
+    ]) {
+      expect(isSerialDirectory(path)).toBe(true);
+    }
+    for (const path of [
+      "/dev/serial/by-id/usb-stick-if00-port0",
+      "/dev/ttyUSB0",
+      "/dev/serial/by-uuid",
+    ]) {
+      expect(isSerialDirectory(path)).toBe(false);
+    }
   });
 });
 
