@@ -156,11 +156,13 @@ describe("isCharacterDevice", () => {
 });
 
 describe("exitCheckNeeded", () => {
-  it("asks only about a running network whose Zigbee2MQTT is not online", () => {
-    expect(exitCheckNeeded("running", false)).toBe(true);
-    expect(exitCheckNeeded("running", undefined)).toBe(true);
-    expect(exitCheckNeeded("running", true)).toBe(false);
-    for (const phase of ["starting", "waiting", "error", "disabled"]) {
+  it("asks about a running or failed network that is not online", () => {
+    for (const phase of ["running", "error"]) {
+      expect(exitCheckNeeded(phase, false)).toBe(true);
+      expect(exitCheckNeeded(phase, undefined)).toBe(true);
+      expect(exitCheckNeeded(phase, true)).toBe(false);
+    }
+    for (const phase of ["starting", "waiting", "disabled"]) {
       expect(exitCheckNeeded(phase, false)).toBe(false);
     }
   });

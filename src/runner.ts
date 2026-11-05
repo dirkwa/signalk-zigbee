@@ -584,10 +584,7 @@ export class ZigbeeRunner {
       path: net.serialPort,
       initiallyAbsent: absent,
       isStarted: () => run.container !== undefined,
-      isHealthy: () =>
-        this.bridge?.isConnected === true
-          ? this.bridge.status().find((s) => s.id === net.id)?.online === true
-          : undefined,
+      isHealthy: () => this.networkOnline(net.id),
       onEvent: (event) =>
         this.queueStickWork(run, () => this.onStickEvent(run, event, signal)),
       debug: (msg) => {
@@ -610,6 +607,17 @@ export class ZigbeeRunner {
           checking = false;
         });
     }, DEVICE_WATCH_INTERVAL_MS);
+  }
+
+  /**
+   * Whether Zigbee2MQTT reports the network online; undefined while the
+   * bridge is not connected, since its last report may be stale then.
+   */
+  private networkOnline(networkId: string): boolean | undefined {
+    if (this.bridge?.isConnected !== true) return undefined;
+    return (
+      this.bridge.status().find((s) => s.id === networkId)?.online === true
+    );
   }
 
   private queueStickWork(
@@ -635,8 +643,7 @@ export class ZigbeeRunner {
   ): Promise<void> {
     const { container, net } = run;
     if (signal.aborted || container === undefined || !this.manager) return;
-    const online = this.bridge?.status().find((s) => s.id === net.id)?.online;
-    if (!exitCheckNeeded(run.phase, online)) return;
+    if (!exitCheckNeeded(run.phase, this.networkOnline(net.id))) return;
     const state = await container.getState();
     if (signal.aborted || !containerGone(state)) return;
     // A stick the probe reports missing is the watch's to handle; one it
