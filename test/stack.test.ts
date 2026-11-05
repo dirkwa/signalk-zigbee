@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { applyDefaults } from "../src/config.js";
 import {
+  containerGone,
   ensureZ2mFiles,
+  exitCheckNeeded,
   initialZ2mConfig,
   isCharacterDevice,
   mosquittoConf,
@@ -150,6 +152,26 @@ describe("isCharacterDevice", () => {
     expect(isCharacterDevice(dir)).toBe(false);
     expect(isCharacterDevice(file)).toBe(false);
     expect(isCharacterDevice(join(dir, "missing"))).toBe(false);
+  });
+});
+
+describe("exitCheckNeeded", () => {
+  it("asks only about a running network whose Zigbee2MQTT is not online", () => {
+    expect(exitCheckNeeded("running", false)).toBe(true);
+    expect(exitCheckNeeded("running", undefined)).toBe(true);
+    expect(exitCheckNeeded("running", true)).toBe(false);
+    for (const phase of ["starting", "waiting", "error", "disabled"]) {
+      expect(exitCheckNeeded(phase, false)).toBe(false);
+    }
+  });
+});
+
+describe("containerGone", () => {
+  it("is true for a stopped or removed container only", () => {
+    expect(containerGone("stopped")).toBe(true);
+    expect(containerGone("missing")).toBe(true);
+    expect(containerGone("running")).toBe(false);
+    expect(containerGone("no-runtime")).toBe(false);
   });
 });
 

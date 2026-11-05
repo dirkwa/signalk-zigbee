@@ -190,6 +190,22 @@ export function usbCoordinatorProblem(
   );
 }
 
+/**
+ * Whether a USB network's container is worth asking about: it should be
+ * running, and Zigbee2MQTT is not online (or the bridge cannot tell).
+ */
+export function exitCheckNeeded(
+  phase: string,
+  online: boolean | undefined,
+): boolean {
+  return phase === "running" && online !== true;
+}
+
+/** Whether a container that should run is stopped or was removed. */
+export function containerGone(state: string): boolean {
+  return state === "stopped" || state === "missing";
+}
+
 export interface CoordinatorAccess {
   /** What Zigbee2MQTT opens: /dev/zigbee or tcp://ip:port. */
   serialPort: string;
