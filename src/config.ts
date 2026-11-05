@@ -172,6 +172,9 @@ export function baseTopic(networkId: string): string {
   return `zigbee2mqtt-${networkId}`;
 }
 
+/** The udev link directories, an easy pick for the stick itself. */
+const SERIAL_DIRECTORY_PATTERN = /^\/dev\/serial(?:\/by-(?:id|path))?\/?$/;
+
 /** Problems that make the configuration unusable, one sentence each. */
 export function validate(settings: Settings): string[] {
   const problems: string[] = [];
@@ -199,6 +202,14 @@ export function validate(settings: Settings): string[] {
     if (net.coordinator === "usb" && !net.serialPort.startsWith("/dev/")) {
       problems.push(
         `Network "${net.id}" needs the serial port of its USB coordinator.`,
+      );
+    } else if (
+      net.coordinator === "usb" &&
+      SERIAL_DIRECTORY_PATTERN.test(net.serialPort)
+    ) {
+      problems.push(
+        `Network "${net.id}": ${net.serialPort} is a directory; choose the ` +
+          "stick's link inside it.",
       );
     }
     if (net.coordinator === "espos" && net.esposAddress === "") {

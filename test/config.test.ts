@@ -110,6 +110,24 @@ describe("validate", () => {
     ]);
   });
 
+  it("refuses the by-id directory for the stick", () => {
+    for (const serialPort of [
+      "/dev/serial/by-id",
+      "/dev/serial/by-id/",
+      "/dev/serial/by-path",
+      "/dev/serial",
+    ]) {
+      expect(
+        validate(applyDefaults({ networks: [{ id: "main", serialPort }] })),
+      ).toEqual([
+        `Network "main": ${serialPort} is a directory; choose the stick's link inside it.`,
+      ]);
+    }
+    expect(
+      validate(applyDefaults({ networks: [{ id: "main", serialPort: USB }] })),
+    ).toEqual([]);
+  });
+
   it("ignores disabled networks beyond their id", () => {
     expect(validate(applyDefaults({ networks: [{ enabled: false }] }))).toEqual(
       [],
