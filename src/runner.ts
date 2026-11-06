@@ -674,9 +674,6 @@ export class ZigbeeRunner {
       run.exitFailures = failures;
       run.exitRetryAt =
         Date.now() + exitRetryDelayMs(failures, DEVICE_WATCH_INTERVAL_MS);
-    } else {
-      run.exitFailures = undefined;
-      run.exitRetryAt = undefined;
     }
   }
 
@@ -714,6 +711,10 @@ export class ZigbeeRunner {
         { signal },
       );
       if (signal.aborted) return;
+      // Any recreate that works, a replug's included, ends the exit check's
+      // back-off, so the next exit is again retried within one interval.
+      run.exitFailures = undefined;
+      run.exitRetryAt = undefined;
       this.setPhase(net.id, "running");
     } catch (err) {
       if (signal.aborted) return;
