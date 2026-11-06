@@ -245,6 +245,15 @@ export function recreateDeferred(
   return reason !== "pluggedIn" && now < (retryAt ?? 0);
 }
 
+/**
+ * Whether the back-off after failed recreates can end without a recreate:
+ * only once Zigbee2MQTT is online. A container that merely runs again may
+ * be the one a stuck recreate could not fix.
+ */
+export function recoveryEstablished(online: boolean | undefined): boolean {
+  return online === true;
+}
+
 /** Whether a container that should run is stopped or was removed. */
 export function containerGone(state: string): boolean {
   return state === "stopped" || state === "missing";

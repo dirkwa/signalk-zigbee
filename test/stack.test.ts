@@ -14,6 +14,7 @@ import {
   mosquittoConf,
   mosquittoContainer,
   nextRetryAt,
+  recoveryEstablished,
   recreateDeferred,
   usbCoordinatorProblem,
   writeMosquittoFiles,
@@ -220,6 +221,14 @@ describe("recreateDeferred", () => {
 
   it("never holds a replugged stick", () => {
     expect(recreateDeferred("pluggedIn", NOW, NOW + 60_000)).toBe(false);
+  });
+});
+
+describe("recoveryEstablished", () => {
+  it("ends the back-off only when Zigbee2MQTT is online", () => {
+    expect(recoveryEstablished(true)).toBe(true);
+    expect(recoveryEstablished(false)).toBe(false);
+    expect(recoveryEstablished(undefined)).toBe(false);
   });
 });
 
