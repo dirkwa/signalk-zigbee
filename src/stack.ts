@@ -202,17 +202,34 @@ export function exitCheckNeeded(
   return (phase === "running" || phase === "error") && online !== true;
 }
 
-/** The longest wait between exit-check recreates that keep failing. */
+/** The longest time between two recreates that keep failing. */
 export const MAX_EXIT_RETRY_MS = 15 * 60_000;
 
 /**
- * Extra wait before the exit check recreates again, after `failures`
- * recreates in a row failed: none after the first, so it is retried on the
- * next check, then doubling per failure up to {@link MAX_EXIT_RETRY_MS}.
+ * Extra wait before the next recreate, after `failures` recreates in a row
+ * failed: none after the first, so it is retried on the next check, then
+ * doubling per failure. Checks run every `intervalMs`, so the wait is capped
+ * one interval short of {@link MAX_EXIT_RETRY_MS} to keep attempts within it.
  */
 export function exitRetryDelayMs(failures: number, intervalMs: number): number {
   if (failures <= 1) return 0;
-  return Math.min(intervalMs * 2 ** (failures - 1), MAX_EXIT_RETRY_MS);
+  return Math.min(
+    intervalMs * 2 ** (failures - 1),
+    MAX_EXIT_RETRY_MS - intervalMs,
+  );
+}
+
+/**
+ * Whether a recreate has to wait for the back-off after failed ones. A
+ * replugged stick is recreated at once, since its new node is a real change;
+ * an exited container and a stuck report wait.
+ */
+export function recreateDeferred(
+  reason: "exited" | "stuck" | "pluggedIn",
+  now: number,
+  retryAt: number | undefined,
+): boolean {
+  return reason !== "pluggedIn" && now < (retryAt ?? 0);
 }
 
 /** Whether a container that should run is stopped or was removed. */

@@ -51,6 +51,7 @@ import {
   exitCheckNeeded,
   exitRetryDelayMs,
   isCharacterDevice,
+  recreateDeferred,
   usbCoordinatorProblem,
   type CoordinatorAccess,
 } from "./stack.js";
@@ -649,7 +650,7 @@ export class ZigbeeRunner {
     const { container, net } = run;
     if (signal.aborted || container === undefined || !this.manager) return;
     if (!exitCheckNeeded(run.phase, this.networkOnline(net.id))) return;
-    if (Date.now() < (run.exitRetryAt ?? 0)) return;
+    if (recreateDeferred("exited", Date.now(), run.exitRetryAt)) return;
     const state = await container.getState();
     if (signal.aborted) return;
     if (!containerGone(state)) {
@@ -666,15 +667,6 @@ export class ZigbeeRunner {
     if (signal.aborted || present === false) return;
     this.app.debug(`${net.id}: Zigbee2MQTT ${state} with its stick plugged in`);
     await this.recreate(run, "Zigbee2MQTT exited; restarting", signal);
-    if (signal.aborted) return;
-    if (run.phase === "error") {
-      // A recreate that keeps failing (an image that cannot be pulled, say)
-      // must not hit the runtime every interval.
-      const failures = (run.exitFailures ?? 0) + 1;
-      run.exitFailures = failures;
-      run.exitRetryAt =
-        Date.now() + exitRetryDelayMs(failures, DEVICE_WATCH_INTERVAL_MS);
-    }
   }
 
   private async onStickEvent(
@@ -692,6 +684,7 @@ export class ZigbeeRunner {
       await this.startUsbNetwork(net, signal);
       return;
     }
+    if (recreateDeferred(event, Date.now(), run.exitRetryAt)) return;
     await this.recreate(run, "restarting Zigbee2MQTT", signal);
   }
 
@@ -718,6 +711,12 @@ export class ZigbeeRunner {
       this.setPhase(net.id, "running");
     } catch (err) {
       if (signal.aborted) return;
+      // A recreate that keeps failing (an image that cannot be pulled, say)
+      // must not hit the runtime on every check or stuck report.
+      const failures = (run.exitFailures ?? 0) + 1;
+      run.exitFailures = failures;
+      run.exitRetryAt =
+        Date.now() + exitRetryDelayMs(failures, DEVICE_WATCH_INTERVAL_MS);
       this.setPhase(net.id, "error", errMsg(err));
     }
   }

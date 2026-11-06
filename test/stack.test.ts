@@ -13,6 +13,7 @@ import {
   isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
+  recreateDeferred,
   usbCoordinatorProblem,
   writeMosquittoFiles,
   z2mContainer,
@@ -177,12 +178,34 @@ describe("exitRetryDelayMs", () => {
     expect(exitRetryDelayMs(1, INTERVAL)).toBe(0);
   });
 
-  it("doubles the wait per failure up to the cap", () => {
+  it("doubles the wait per failure", () => {
     expect(exitRetryDelayMs(2, INTERVAL)).toBe(60_000);
     expect(exitRetryDelayMs(3, INTERVAL)).toBe(120_000);
     expect(exitRetryDelayMs(5, INTERVAL)).toBe(480_000);
-    expect(exitRetryDelayMs(6, INTERVAL)).toBe(MAX_EXIT_RETRY_MS);
-    expect(exitRetryDelayMs(50, INTERVAL)).toBe(MAX_EXIT_RETRY_MS);
+  });
+
+  it("keeps the wait plus one check interval within the cap", () => {
+    for (const failures of [6, 7, 50]) {
+      const delay = exitRetryDelayMs(failures, INTERVAL);
+      expect(delay).toBe(MAX_EXIT_RETRY_MS - INTERVAL);
+      expect(delay + INTERVAL).toBeLessThanOrEqual(MAX_EXIT_RETRY_MS);
+    }
+  });
+});
+
+describe("recreateDeferred", () => {
+  const NOW = 1_000_000;
+
+  it("holds exited and stuck recreates until the back-off ends", () => {
+    for (const reason of ["exited", "stuck"] as const) {
+      expect(recreateDeferred(reason, NOW, NOW + 1)).toBe(true);
+      expect(recreateDeferred(reason, NOW, NOW)).toBe(false);
+      expect(recreateDeferred(reason, NOW, undefined)).toBe(false);
+    }
+  });
+
+  it("never holds a replugged stick", () => {
+    expect(recreateDeferred("pluggedIn", NOW, NOW + 60_000)).toBe(false);
   });
 });
 
