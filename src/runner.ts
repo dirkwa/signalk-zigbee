@@ -35,7 +35,11 @@ import {
   type Settings,
 } from "./config.js";
 import { describeSticks, findSticks, type UsbStick } from "./coordinators.js";
-import { CoordinatorDiscovery, type Coordinator } from "./discovery.js";
+import {
+  CoordinatorDiscovery,
+  matchesCoordinator,
+  type Coordinator,
+} from "./discovery.js";
 import {
   COORDINATOR_DEVICE,
   ensureZ2mFiles,
@@ -129,7 +133,7 @@ export interface StatusReport {
   discovered: Coordinator[];
   /**
    * Zigbee sticks plugged into the host, listed while no network is
-   * configured. A single one becomes the "main" network on its own.
+   * configured. The user picks one in the web app (`useCoordinator`).
    */
   usbSticks: UsbStick[];
 }
@@ -150,6 +154,8 @@ export class ZigbeeRunner {
   private configWrite: Promise<void> = Promise.resolve();
   private running = false;
   private usbSticks: UsbStick[] = [];
+  /** A `useCoordinator` is saving; a second pick would overwrite it. */
+  private choosing = false;
   private stickSearch: ReturnType<typeof setInterval> | undefined;
 
   constructor(private readonly app: ServerAPI) {}
@@ -324,13 +330,23 @@ export class ZigbeeRunner {
     this.manager = manager;
 
     if (settings.networks.length === 0) {
-      if (await this.adoptStick(settings, signal)) return;
+      await this.lookForSticks(signal);
       if (signal.aborted) return;
+      // Browsing mDNS never connects to a coordinator, so gateways can be
+      // offered next to sticks.
+      const discovery = new CoordinatorDiscovery(() => this.report());
+      this.discovery = discovery;
+      await discovery.start();
+      if (signal.aborted) {
+        discovery.stop();
+        if (this.discovery === discovery) this.discovery = undefined;
+        return;
+      }
       let searching = false;
       this.stickSearch = setInterval(() => {
         if (searching || signal.aborted) return;
         searching = true;
-        void this.adoptStick(settings, signal).finally(() => {
+        void this.lookForSticks(signal).finally(() => {
           searching = false;
         });
       }, STICK_SEARCH_INTERVAL_MS);
@@ -524,65 +540,95 @@ export class ZigbeeRunner {
     );
   }
 
-  /**
-   * With no network configured, a single Zigbee stick on the host becomes the
-   * "main" network: saved to the plugin configuration, then started. Several
-   * sticks are only listed, for the user to choose. Returns true when the
-   * plugin restarted with the new network.
-   */
-  private async adoptStick(
-    settings: Settings,
-    signal: AbortSignal,
-  ): Promise<boolean> {
-    if (this.manager === undefined) return false;
+  /** With no network configured, lists the Zigbee sticks on the host. */
+  private async lookForSticks(signal: AbortSignal): Promise<void> {
+    if (this.manager === undefined) return;
     let paths: string[] | null;
     try {
       paths = await listHostSerialDevices(this.manager);
     } catch (err) {
       this.app.debug(`listing USB serial devices failed: ${errMsg(err)}`);
-      return false;
+      return;
     }
-    if (signal.aborted || paths === null) return false;
+    if (signal.aborted || paths === null) return;
     this.usbSticks = findSticks(paths);
-    const [stick] = this.usbSticks;
-    if (stick === undefined || this.usbSticks.length > 1) {
-      this.report();
-      return false;
+    this.report();
+  }
+
+  /**
+   * Makes the stick or espOS gateway the user picked the "main" network:
+   * saved to the plugin configuration, then started. Never done unasked:
+   * Zigbee2MQTT forms a new network on the coordinator, which ends any
+   * network another program kept there.
+   */
+  async useCoordinator(
+    pick: { serialPort: string } | { espos: string },
+  ): Promise<void> {
+    const settings = this.settings;
+    const signal = this.abort?.signal;
+    if (!this.running || settings === undefined || signal === undefined) {
+      throw new UseCoordinatorError(503, `${PLUGIN_ID} is not running`);
     }
-    const adopted = applyDefaults({
-      ...settings,
-      networks: [{ id: "main", coordinator: "usb", ...stick }],
-    });
-    // Unsaved, the network would vanish from the plugin settings and the next
-    // start would set it up again; the search retries the save instead.
-    const saved = await new Promise<void>((resolve, reject) => {
-      this.app.savePluginOptions(adopted, (err) => {
-        if (err) reject(err);
-        else resolve();
+    if (settings.networks.length > 0 || this.choosing) {
+      throw new UseCoordinatorError(409, "a network is already configured");
+    }
+    let network: Record<string, unknown>;
+    let what: string;
+    if ("serialPort" in pick) {
+      const stick = this.usbSticks.find(
+        (s) => s.serialPort === pick.serialPort,
+      );
+      if (stick === undefined) {
+        throw new UseCoordinatorError(
+          404,
+          `no Zigbee stick at ${pick.serialPort}`,
+        );
+      }
+      network = { id: "main", coordinator: "usb", ...stick };
+      what = `Zigbee stick ${stick.serialPort} (${stick.adapter})`;
+    } else {
+      const found = (this.discovery?.list() ?? []).find((c) =>
+        matchesCoordinator(pick.espos, c),
+      );
+      if (found === undefined) {
+        throw new UseCoordinatorError(
+          404,
+          `no espOS coordinator ${pick.espos} on mDNS`,
+        );
+      }
+      network = {
+        id: "main",
+        coordinator: "espos",
+        esposAddress: found.deviceId ?? found.name,
+      };
+      what = `espOS coordinator ${found.name} (${found.address})`;
+    }
+    const adopted = applyDefaults({ ...settings, networks: [network] });
+    this.choosing = true;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.app.savePluginOptions(adopted, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
       });
-    }).then(
-      () => true,
-      (err: unknown) => {
-        this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
-        return false;
-      },
-    );
-    if (!saved) return false;
-    if (signal.aborted) return true;
-    this.app.debug(
-      `using Zigbee stick ${stick.serialPort} (${stick.adapter}) as network main`,
-    );
-    // start() expects stop() to have run: the search may find the stick after
-    // this run connected to the broker and began mDNS discovery.
+    } catch (err) {
+      this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
+      throw err;
+    } finally {
+      this.choosing = false;
+    }
+    if (signal.aborted) return;
+    this.app.debug(`using ${what} as network main`);
+    // start() expects stop() to have run.
     this.discovery?.stop();
     this.discovery = undefined;
     const bridge = this.bridge;
     await bridge?.stop();
     // A start() during the await owns this.bridge now, maybe with a new one.
-    if (signal.aborted) return true;
+    if (signal.aborted) return;
     if (this.bridge === bridge) this.bridge = undefined;
     this.start(adopted);
-    return true;
   }
 
   /**
@@ -914,15 +960,18 @@ export class ZigbeeRunner {
           .join(", ")}`,
       );
     }
-    if (status.usbSticks.length > 1) {
+    const found = status.usbSticks.length + status.discovered.length;
+    if (found > 0 && status.networks.length === 0) {
       parts.push(
-        `${String(status.usbSticks.length)} Zigbee sticks found; add the one to use under Plugin Config`,
+        found === 1
+          ? "Zigbee coordinator found; choose it in the Zigbee web app"
+          : `${String(found)} Zigbee coordinators found; choose one in the Zigbee web app`,
       );
     }
     const line =
       parts.join(" · ") ||
       (status.networks.length === 0
-        ? "Waiting for a Zigbee stick or a network in Plugin Config"
+        ? "Waiting for a Zigbee stick or espOS gateway"
         : "Broker running");
     if (errors.length > 0) {
       this.app.setPluginError(line);
@@ -933,5 +982,15 @@ export class ZigbeeRunner {
           : `${line} · MQTT not connected`,
       );
     }
+  }
+}
+
+/** A refused `useCoordinator`, with the HTTP status that says why. */
+export class UseCoordinatorError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message);
   }
 }
