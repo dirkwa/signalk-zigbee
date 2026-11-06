@@ -17,8 +17,16 @@ supported:
 
 - **A USB stick on the Signal K host**, e.g. Sonoff ZBDongle-E/-P, Home
   Assistant SkyConnect/ZBT-1, or a compatible clone.
-- **An espOS device on the network**, reached by Zigbee2MQTT at
-  `tcp://<ip>:6638` with the `zboss` adapter.
+- **An espOS Zigbee gateway on the boat's network**: a small ESP32-C5 or
+  ESP32-C6 board running the
+  [espos-zigbee-coordinator](https://github.com/dirkwa/espos-zigbee-coordinator)
+  firmware. It puts the Zigbee radio on the boat's Wi-Fi, so it can sit where
+  the sensors are instead of in a USB port on the Signal K server. Flash it
+  from the [hosted flasher](https://signalk-espos.github.io/signalk-espos-manager/flash/)
+  in Chrome or Edge, or from the Flash page of
+  [signalk-espos-manager](https://github.com/signalk-espOS/signalk-espos-manager).
+  Zigbee2MQTT reaches it at `tcp://<ip>:6638` with the `zboss` adapter; the
+  plugin finds it by itself.
 
 Zigbee2MQTT drives exactly one coordinator, so the plugin starts one
 Zigbee2MQTT container per coordinator. Each coordinator forms its own Zigbee
@@ -44,23 +52,29 @@ network; a device is paired to one of them. Networks are not merged.
 
 ## Configuration
 
-**A single USB stick needs no configuration.** The plugin is enabled when
-it is installed, so after the server restart it is already running (disable
-it under Plugin Config if you don't want it). Until a network exists it starts no
-container, so port 1883 stays free for a broker the boat already runs. While no network is
-configured, the plugin looks for a known Zigbee coordinator among the
-host's `/dev/serial/by-id` devices about once a minute. When it finds
-exactly one, it saves it as the network `main` with the matching adapter
-driver and starts it. Recognised are, among others, the Sonoff ZBDongle-P,
--E and Dongle Max/Plus/Lite, ConBee II and III, Home Assistant SkyConnect
-and Connect ZBT-1/ZBT-2, SMLIGHT SLZB-06/07, ZiGate and TI CC2531/CC2652
-sticks. With several sticks plugged in, the web app lists them and you add
-the one to use. A containerized Signal K needs signalk-container 1.37.2 or
-later for this.
+**Choosing the coordinator is one click.** The plugin is enabled when it is
+installed, so after the server restart it is already running (disable it
+under Plugin Config if you don't want it). Until a network exists it starts
+no container, so port 1883 stays free for a broker the boat already runs.
+
+While no network is configured, the plugin looks for coordinators: Zigbee
+sticks among the host's `/dev/serial/by-id` devices, about once a minute, and
+espOS Zigbee gateways on the network through mDNS. The **Zigbee** web app
+lists what it found, each with a **Use this stick** or **Use this gateway**
+button for an admin. One click saves it as the network `main`, with the
+matching adapter driver for a stick, and starts Mosquitto and Zigbee2MQTT.
+The plugin never does this on its own: Zigbee2MQTT forms a new Zigbee network
+on the coordinator, which ends a network another program (Home Assistant, for
+one) kept on it.
+
+Recognised sticks are, among others, the Sonoff ZBDongle-P, -E and Dongle
+Max/Plus/Lite, ConBee II and III, Home Assistant SkyConnect and Connect
+ZBT-1/ZBT-2, SMLIGHT SLZB-06/07, ZiGate and TI CC2531/CC2652. A containerized
+Signal K needs signalk-container 1.37.2 or later to list them.
 
 An original ConBee (before ConBee II) may show up only under a generic FTDI
 name such as `usb-FTDI_FT230X_Basic_UART_…`, which other serial adapters
-share, so it is not set up on its own. Add it by hand with adapter driver
+share, so it is not offered. Add it by hand with adapter driver
 `deconz` and baud rate 38400.
 
 Otherwise: Server → Plugin Config → Zigbee (Zigbee2MQTT). Add one entry under
