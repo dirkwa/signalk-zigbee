@@ -10,7 +10,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ContainerConfig } from "signalk-container-helper";
@@ -148,6 +148,15 @@ export function z2mEnv(
  */
 const HOST_PASSED_SERIAL_RE =
   /^\/dev\/(?:serial\/by-(?:id|path)\/[^/]+|tty(?:USB|ACM)\d+)$/;
+
+/** True for a device node, so a directory or a plain file is not a stick. */
+export function isCharacterDevice(path: string): boolean {
+  try {
+    return statSync(path).isCharacterDevice();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Why a USB coordinator cannot be handed to Zigbee2MQTT, or undefined.

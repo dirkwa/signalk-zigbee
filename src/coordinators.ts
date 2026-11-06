@@ -68,3 +68,8 @@ export function findSticks(paths: readonly string[]): UsbStick[] {
     ];
   });
 }
+
+/** The sticks for a status line: "path (driver), …". */
+export function describeSticks(sticks: readonly UsbStick[]): string {
+  return sticks.map((s) => `${s.serialPort} (${s.adapter})`).join(", ");
+}

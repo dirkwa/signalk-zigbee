@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findSticks, identifyCoordinator } from "../src/coordinators.js";
+import {
+  describeSticks,
+  findSticks,
+  identifyCoordinator,
+} from "../src/coordinators.js";
 
 const BY_ID = "/dev/serial/by-id/";
 
@@ -78,5 +82,16 @@ describe("findSticks", () => {
 
   it("finds nothing among other serial devices", () => {
     expect(findSticks([`${BY_ID}usb-FTDI_GPS-if00-port0`])).toEqual([]);
+  });
+});
+
+describe("describeSticks", () => {
+  it("names each stick with its driver", () => {
+    expect(
+      describeSticks([
+        { serialPort: `${BY_ID}usb-a-if00-port0`, adapter: "ember" },
+        { serialPort: `${BY_ID}usb-b-if00`, adapter: "zstack" },
+      ]),
+    ).toBe(`${BY_ID}usb-a-if00-port0 (ember), ${BY_ID}usb-b-if00 (zstack)`);
   });
 });

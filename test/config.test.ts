@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyDefaults,
+  isSerialDirectory,
   validate,
   Z2M_ESPOS_IMAGE,
   Z2M_OFFICIAL_DEFAULT_TAG,
@@ -77,6 +78,30 @@ describe("z2mImage", () => {
   });
 });
 
+describe("isSerialDirectory", () => {
+  it("matches the udev link directories only", () => {
+    for (const path of [
+      "/dev/serial",
+      "/dev/serial/",
+      "/dev/serial/by-id",
+      "/dev/serial/by-id/",
+      "/dev/serial/by-path/",
+      "/dev/serial/by-id/.",
+      "/dev/serial//by-id",
+      "/dev/serial/by-id/x/..",
+    ]) {
+      expect(isSerialDirectory(path)).toBe(true);
+    }
+    for (const path of [
+      "/dev/serial/by-id/usb-stick-if00-port0",
+      "/dev/ttyUSB0",
+      "/dev/serial/by-uuid",
+    ]) {
+      expect(isSerialDirectory(path)).toBe(false);
+    }
+  });
+});
+
 describe("validate", () => {
   it("accepts a USB and an espOS network side by side", () => {
     expect(
@@ -108,6 +133,25 @@ describe("validate", () => {
       'Network "Main" uses port 1883, which the broker already uses.',
       'Network "Main" needs the address or mDNS name of its espOS coordinator.',
     ]);
+  });
+
+  it("refuses the by-id directory for the stick", () => {
+    for (const serialPort of [
+      "/dev/serial/by-id",
+      "/dev/serial/by-id/",
+      "/dev/serial/by-path",
+      "/dev/serial",
+      "/dev/serial/by-id/.",
+    ]) {
+      expect(
+        validate(applyDefaults({ networks: [{ id: "main", serialPort }] })),
+      ).toEqual([
+        `Network "main": ${serialPort} is a directory; choose the stick's link inside it.`,
+      ]);
+    }
+    expect(
+      validate(applyDefaults({ networks: [{ id: "main", serialPort: USB }] })),
+    ).toEqual([]);
   });
 
   it("ignores disabled networks beyond their id", () => {
