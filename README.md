@@ -44,7 +44,9 @@ network; a device is paired to one of them. Networks are not merged.
 
 ## Configuration
 
-**A single USB stick needs no configuration.** While no network is
+**A single USB stick needs no configuration.** The plugin is enabled when
+it is installed, so after the server restart it is already running (disable
+it under Plugin Config if you don't want it). While no network is
 configured, the plugin looks for a known Zigbee coordinator among the
 host's `/dev/serial/by-id` devices about once a minute. When it finds
 exactly one, it saves it as the network `main` with the matching adapter

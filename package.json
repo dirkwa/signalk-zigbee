@@ -41,6 +41,7 @@
     "type": "git",
     "url": "git+https://github.com/dirkwa/signalk-zigbee.git"
   },
+  "signalk-plugin-enabled-by-default": true,
   "signalk": {
     "displayName": "Zigbee (Zigbee2MQTT)",
     "appIcon": "./icon.svg",
