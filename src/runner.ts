@@ -334,6 +334,12 @@ export class ZigbeeRunner {
           searching = false;
         });
       }, STICK_SEARCH_INTERVAL_MS);
+      // Port 1883 stays free until there is a network to serve: the plugin is
+      // enabled on install, and the boat may already run its own broker.
+      await this.stopOrphans(manager, settings);
+      if (signal.aborted) return;
+      this.report();
+      return;
     }
 
     this.progress("Preparing the data directory");
@@ -922,7 +928,9 @@ export class ZigbeeRunner {
       this.app.setPluginError(line);
     } else {
       this.app.setPluginStatus(
-        status.brokerConnected ? line : `${line} · MQTT not connected`,
+        status.brokerConnected || status.networks.length === 0
+          ? line
+          : `${line} · MQTT not connected`,
       );
     }
   }
