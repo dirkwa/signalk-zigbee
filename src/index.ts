@@ -17,7 +17,7 @@ import {
   UI_SCHEMA,
 } from "./config.js";
 import { BridgeRequestError } from "./bridge.js";
-import { ZigbeeRunner } from "./runner.js";
+import { UseCoordinatorError, ZigbeeRunner } from "./runner.js";
 
 interface RequestLike {
   params: Record<string, string>;
@@ -108,6 +108,33 @@ export default function createPlugin(app: ServerAPI): Plugin {
           (err: unknown) =>
             res
               .status(err instanceof BridgeRequestError ? err.statusCode : 502)
+              .json({ error: errMsg(err) }),
+        );
+      });
+
+      // POST /plugins/signalk-zigbee/api/use-coordinator
+      // body: { "serialPort": "/dev/serial/by-id/…" } or { "espos": "<id>" }
+      // — makes a found stick or espOS gateway the network "main", while no
+      // network is configured.
+      pluginRouter.post("/api/use-coordinator", (req, res) => {
+        const body = (req.body ?? {}) as {
+          serialPort?: unknown;
+          espos?: unknown;
+        };
+        let pick: { serialPort: string } | { espos: string };
+        if (typeof body.serialPort === "string" && body.serialPort !== "") {
+          pick = { serialPort: body.serialPort };
+        } else if (typeof body.espos === "string" && body.espos !== "") {
+          pick = { espos: body.espos };
+        } else {
+          res.status(400).json({ error: "give serialPort or espos" });
+          return;
+        }
+        runner.useCoordinator(pick).then(
+          () => res.json({ network: "main", ...pick }),
+          (err: unknown) =>
+            res
+              .status(err instanceof UseCoordinatorError ? err.statusCode : 500)
               .json({ error: errMsg(err) }),
         );
       });

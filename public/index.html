@@ -149,6 +149,21 @@
         padding: 0;
         font-size: 0.9em;
       }
+      .found {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        margin: 8px 0;
+      }
+      .found span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .found button {
+        min-height: 44px;
+        padding: 8px 16px;
+      }
       .notice {
         margin: 10px 0 0;
       }
@@ -172,6 +187,10 @@
       let editing = null;
       /** { network, text } after a rename. */
       let notice = null;
+      /** The coordinator being set up (its JSON pick); all choices wait. */
+      let adopting = null;
+      /** { text, at } when choosing a coordinator failed. */
+      let adoptError = null;
 
       function el(tag, attrs, ...children) {
         const node = document.createElement(tag);
@@ -474,6 +493,43 @@
         );
       }
 
+      /** Makes the chosen stick or espOS gateway the network "main". */
+      async function useCoordinator(pick) {
+        adopting = JSON.stringify(pick);
+        adoptError = null;
+        // Every other choice goes disabled now, not at the next refresh.
+        render(lastStatus);
+        try {
+          const res = await fetch(`${API}/use-coordinator`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: adopting,
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            adoptError = {
+              text: body.error || `Failed (${res.status})`,
+              at: Date.now(),
+            };
+          }
+        } catch (err) {
+          adoptError = { text: String(err), at: Date.now() };
+        }
+        adopting = null;
+        await refresh();
+      }
+
+      /** A button that makes `pick` the network, or null for a non-admin. */
+      function chooseButton(pick, label) {
+        if (!isAdmin || lastStatus?.networks.length) return null;
+        const key = JSON.stringify(pick);
+        return el(
+          "button",
+          { onclick: () => useCoordinator(pick), disabled: adopting !== null },
+          adopting === key ? "Starting…" : label,
+        );
+      }
+
       function render(status) {
         if (!status) return;
         lastStatus = status;
@@ -493,15 +549,40 @@
         if (!status.running) {
           nodes.push(el("p", { class: "muted" }, "The plugin is not running."));
         } else if (!status.networks.length) {
+          const found =
+            (status.usbSticks?.length ?? 0) + status.discovered.length;
           nodes.push(
             el(
               "p",
               { class: "muted" },
-              (status.usbSticks?.length ?? 0) > 1
-                ? "No network configured. Several Zigbee USB sticks are plugged in, so none is set up on its own; choose one below."
-                : "No network configured. Plug in a Zigbee USB stick and it is set up on its own, or add a network under Server → Plugin Config → Zigbee.",
+              found
+                ? "No network configured yet. Choose the coordinator to use below."
+                : "No network configured yet. Plug a Zigbee USB stick into this host or switch on an espOS Zigbee gateway on the boat's network, and it is listed here within a minute. You can also add a network under Server → Plugin Config → Zigbee.",
             ),
           );
+          if (found && !isAdmin) {
+            nodes.push(
+              el(
+                "p",
+                { class: "muted" },
+                "Log in to Signal K as an admin to choose one.",
+              ),
+            );
+          }
+          if (found && isAdmin) {
+            nodes.push(
+              el(
+                "p",
+                { class: "muted" },
+                "Zigbee2MQTT forms a new Zigbee network on the coordinator you choose. A network another program kept on it (Home Assistant, for one) ends.",
+              ),
+            );
+          }
+          // A failed choice stays shown for a while, not for good: the
+          // stick may be plugged back in meanwhile.
+          if (adoptError && Date.now() - adoptError.at < 30000) {
+            nodes.push(el("p", { class: "bad" }, adoptError.text));
+          }
         }
         nodes.push(...status.networks.map(network));
         if (status.usbSticks?.length) {
@@ -510,13 +591,13 @@
               "section",
               {},
               el("h2", {}, "Zigbee USB sticks found"),
-              el(
-                "p",
-                { class: "muted" },
-                "Add a network under Server → Plugin Config → Zigbee with the serial port and driver of the stick to use.",
-              ),
               ...status.usbSticks.map((s) =>
-                el("p", {}, `${s.serialPort} — driver ${s.adapter}`),
+                el(
+                  "div",
+                  { class: "found" },
+                  el("span", {}, `${s.serialPort} — driver ${s.adapter}`),
+                  chooseButton({ serialPort: s.serialPort }, "Use this stick"),
+                ),
               ),
             ),
           );
@@ -526,12 +607,26 @@
             el(
               "section",
               {},
-              el("h2", {}, "espOS coordinators not in use"),
+              el(
+                "h2",
+                {},
+                status.networks.length
+                  ? "espOS Zigbee gateways not in use"
+                  : "espOS Zigbee gateways found",
+              ),
               ...status.discovered.map((c) =>
                 el(
-                  "p",
-                  {},
-                  `${c.name} — ${c.address}:${c.port}${c.deviceId ? ` (id ${c.deviceId})` : ""}`,
+                  "div",
+                  { class: "found" },
+                  el(
+                    "span",
+                    {},
+                    `${c.name} — ${c.address}:${c.port}${c.deviceId ? ` (id ${c.deviceId})` : ""}`,
+                  ),
+                  chooseButton(
+                    { espos: c.deviceId ?? c.name },
+                    "Use this gateway",
+                  ),
                 ),
               ),
             ),
