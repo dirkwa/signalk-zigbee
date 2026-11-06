@@ -7,7 +7,9 @@ import {
   containerGone,
   ensureZ2mFiles,
   exitCheckNeeded,
+  exitRetryDelayMs,
   initialZ2mConfig,
+  MAX_EXIT_RETRY_MS,
   isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
@@ -165,6 +167,22 @@ describe("exitCheckNeeded", () => {
     for (const phase of ["starting", "waiting", "disabled"]) {
       expect(exitCheckNeeded(phase, false)).toBe(false);
     }
+  });
+});
+
+describe("exitRetryDelayMs", () => {
+  const INTERVAL = 30_000;
+
+  it("retries the first failure on the next check", () => {
+    expect(exitRetryDelayMs(1, INTERVAL)).toBe(0);
+  });
+
+  it("doubles the wait per failure up to the cap", () => {
+    expect(exitRetryDelayMs(2, INTERVAL)).toBe(60_000);
+    expect(exitRetryDelayMs(3, INTERVAL)).toBe(120_000);
+    expect(exitRetryDelayMs(5, INTERVAL)).toBe(480_000);
+    expect(exitRetryDelayMs(6, INTERVAL)).toBe(MAX_EXIT_RETRY_MS);
+    expect(exitRetryDelayMs(50, INTERVAL)).toBe(MAX_EXIT_RETRY_MS);
   });
 });
 

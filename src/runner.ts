@@ -49,6 +49,7 @@ import {
   Z2M_CONTAINER_PREFIX,
   containerGone,
   exitCheckNeeded,
+  exitRetryDelayMs,
   isCharacterDevice,
   usbCoordinatorProblem,
   type CoordinatorAccess,
@@ -87,6 +88,10 @@ interface NetworkRun {
   exitCheck?: ReturnType<typeof setInterval>;
   /** USB networks: the stick handling in progress, one step at a time. */
   stickWork?: Promise<void>;
+  /** Recreates by the exit check that failed in a row. */
+  exitFailures?: number;
+  /** No exit-check recreate before this time (ms since epoch). */
+  exitRetryAt?: number;
   /** The container's first start, which an unplug stop must not overtake. */
   starting?: Promise<unknown>;
 }
@@ -644,8 +649,14 @@ export class ZigbeeRunner {
     const { container, net } = run;
     if (signal.aborted || container === undefined || !this.manager) return;
     if (!exitCheckNeeded(run.phase, this.networkOnline(net.id))) return;
+    if (Date.now() < (run.exitRetryAt ?? 0)) return;
     const state = await container.getState();
-    if (signal.aborted || !containerGone(state)) return;
+    if (signal.aborted) return;
+    if (!containerGone(state)) {
+      run.exitFailures = undefined;
+      run.exitRetryAt = undefined;
+      return;
+    }
     // A stick the probe reports missing is the watch's to handle; one it
     // cannot tell about is tried, since the container is down either way.
     const present = await probeHostDevice(this.manager, net.serialPort).then(
@@ -655,6 +666,18 @@ export class ZigbeeRunner {
     if (signal.aborted || present === false) return;
     this.app.debug(`${net.id}: Zigbee2MQTT ${state} with its stick plugged in`);
     await this.recreate(run, "Zigbee2MQTT exited; restarting", signal);
+    if (signal.aborted) return;
+    if (run.phase === "error") {
+      // A recreate that keeps failing (an image that cannot be pulled, say)
+      // must not hit the runtime every interval.
+      const failures = (run.exitFailures ?? 0) + 1;
+      run.exitFailures = failures;
+      run.exitRetryAt =
+        Date.now() + exitRetryDelayMs(failures, DEVICE_WATCH_INTERVAL_MS);
+    } else {
+      run.exitFailures = undefined;
+      run.exitRetryAt = undefined;
+    }
   }
 
   private async onStickEvent(

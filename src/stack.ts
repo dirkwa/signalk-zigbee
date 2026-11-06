@@ -202,6 +202,19 @@ export function exitCheckNeeded(
   return (phase === "running" || phase === "error") && online !== true;
 }
 
+/** The longest wait between exit-check recreates that keep failing. */
+export const MAX_EXIT_RETRY_MS = 15 * 60_000;
+
+/**
+ * Extra wait before the exit check recreates again, after `failures`
+ * recreates in a row failed: none after the first, so it is retried on the
+ * next check, then doubling per failure up to {@link MAX_EXIT_RETRY_MS}.
+ */
+export function exitRetryDelayMs(failures: number, intervalMs: number): number {
+  if (failures <= 1) return 0;
+  return Math.min(intervalMs * 2 ** (failures - 1), MAX_EXIT_RETRY_MS);
+}
+
 /** Whether a container that should run is stopped or was removed. */
 export function containerGone(state: string): boolean {
   return state === "stopped" || state === "missing";
