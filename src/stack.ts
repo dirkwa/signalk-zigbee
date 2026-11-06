@@ -190,6 +190,75 @@ export function usbCoordinatorProblem(
   );
 }
 
+/**
+ * Whether a USB network's container is worth asking about: it should be
+ * running (or its last recreate failed), and Zigbee2MQTT is not online (or
+ * the bridge cannot tell).
+ */
+export function exitCheckNeeded(
+  phase: string,
+  online: boolean | undefined,
+): boolean {
+  return (phase === "running" || phase === "error") && online !== true;
+}
+
+/** The longest time between two recreates that keep failing. */
+export const MAX_EXIT_RETRY_MS = 15 * 60_000;
+
+/**
+ * Extra wait before the next recreate, after `failures` recreates in a row
+ * failed: none after the first, so it is retried on the next check, then
+ * doubling per failure. Checks run every `intervalMs`, so the wait is capped
+ * one interval short of {@link MAX_EXIT_RETRY_MS} to keep attempts within it.
+ */
+export function exitRetryDelayMs(failures: number, intervalMs: number): number {
+  if (failures <= 1) return 0;
+  return Math.min(
+    intervalMs * 2 ** (failures - 1),
+    MAX_EXIT_RETRY_MS - intervalMs,
+  );
+}
+
+/**
+ * When the next recreate may start, counted from when the failed one
+ * started: a slow failure (an image pull that timed out) does not stretch
+ * the gap between two attempts beyond the back-off.
+ */
+export function nextRetryAt(
+  attemptStart: number,
+  failures: number,
+  intervalMs: number,
+): number {
+  return attemptStart + exitRetryDelayMs(failures, intervalMs);
+}
+
+/**
+ * Whether a recreate has to wait for the back-off after failed ones. A
+ * replugged stick is recreated at once, since its new node is a real change;
+ * an exited container and a stuck report wait.
+ */
+export function recreateDeferred(
+  reason: "exited" | "stuck" | "pluggedIn",
+  now: number,
+  retryAt: number | undefined,
+): boolean {
+  return reason !== "pluggedIn" && now < (retryAt ?? 0);
+}
+
+/**
+ * Whether the back-off after failed recreates can end without a recreate:
+ * only once Zigbee2MQTT is online. A container that merely runs again may
+ * be the one a stuck recreate could not fix.
+ */
+export function recoveryEstablished(online: boolean | undefined): boolean {
+  return online === true;
+}
+
+/** Whether a container that should run is stopped or was removed. */
+export function containerGone(state: string): boolean {
+  return state === "stopped" || state === "missing";
+}
+
 export interface CoordinatorAccess {
   /** What Zigbee2MQTT opens: /dev/zigbee or tcp://ip:port. */
   serialPort: string;

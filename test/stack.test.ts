@@ -4,11 +4,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { applyDefaults } from "../src/config.js";
 import {
+  containerGone,
   ensureZ2mFiles,
+  exitCheckNeeded,
+  exitRetryDelayMs,
   initialZ2mConfig,
+  MAX_EXIT_RETRY_MS,
   isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
+  nextRetryAt,
+  recoveryEstablished,
+  recreateDeferred,
   usbCoordinatorProblem,
   writeMosquittoFiles,
   z2mContainer,
@@ -150,6 +157,87 @@ describe("isCharacterDevice", () => {
     expect(isCharacterDevice(dir)).toBe(false);
     expect(isCharacterDevice(file)).toBe(false);
     expect(isCharacterDevice(join(dir, "missing"))).toBe(false);
+  });
+});
+
+describe("exitCheckNeeded", () => {
+  it("asks about a running or failed network that is not online", () => {
+    for (const phase of ["running", "error"]) {
+      expect(exitCheckNeeded(phase, false)).toBe(true);
+      expect(exitCheckNeeded(phase, undefined)).toBe(true);
+      expect(exitCheckNeeded(phase, true)).toBe(false);
+    }
+    for (const phase of ["starting", "waiting", "disabled"]) {
+      expect(exitCheckNeeded(phase, false)).toBe(false);
+    }
+  });
+});
+
+describe("exitRetryDelayMs", () => {
+  const INTERVAL = 30_000;
+
+  it("retries the first failure on the next check", () => {
+    expect(exitRetryDelayMs(1, INTERVAL)).toBe(0);
+  });
+
+  it("doubles the wait per failure", () => {
+    expect(exitRetryDelayMs(2, INTERVAL)).toBe(60_000);
+    expect(exitRetryDelayMs(3, INTERVAL)).toBe(120_000);
+    expect(exitRetryDelayMs(5, INTERVAL)).toBe(480_000);
+  });
+
+  it("keeps the wait plus one check interval within the cap", () => {
+    for (const failures of [6, 7, 50]) {
+      const delay = exitRetryDelayMs(failures, INTERVAL);
+      expect(delay).toBe(MAX_EXIT_RETRY_MS - INTERVAL);
+      expect(delay + INTERVAL).toBeLessThanOrEqual(MAX_EXIT_RETRY_MS);
+    }
+  });
+});
+
+describe("nextRetryAt", () => {
+  const INTERVAL = 30_000;
+
+  it("counts the back-off from the start of the failed attempt", () => {
+    const start = 1_000_000;
+    expect(nextRetryAt(start, 1, INTERVAL)).toBe(start);
+    expect(nextRetryAt(start, 3, INTERVAL)).toBe(start + 120_000);
+    expect(nextRetryAt(start, 50, INTERVAL) - start).toBeLessThanOrEqual(
+      MAX_EXIT_RETRY_MS - INTERVAL,
+    );
+  });
+});
+
+describe("recreateDeferred", () => {
+  const NOW = 1_000_000;
+
+  it("holds exited and stuck recreates until the back-off ends", () => {
+    for (const reason of ["exited", "stuck"] as const) {
+      expect(recreateDeferred(reason, NOW, NOW + 1)).toBe(true);
+      expect(recreateDeferred(reason, NOW, NOW)).toBe(false);
+      expect(recreateDeferred(reason, NOW, undefined)).toBe(false);
+    }
+  });
+
+  it("never holds a replugged stick", () => {
+    expect(recreateDeferred("pluggedIn", NOW, NOW + 60_000)).toBe(false);
+  });
+});
+
+describe("recoveryEstablished", () => {
+  it("ends the back-off only when Zigbee2MQTT is online", () => {
+    expect(recoveryEstablished(true)).toBe(true);
+    expect(recoveryEstablished(false)).toBe(false);
+    expect(recoveryEstablished(undefined)).toBe(false);
+  });
+});
+
+describe("containerGone", () => {
+  it("is true for a stopped or removed container only", () => {
+    expect(containerGone("stopped")).toBe(true);
+    expect(containerGone("missing")).toBe(true);
+    expect(containerGone("running")).toBe(false);
+    expect(containerGone("no-runtime")).toBe(false);
   });
 });
 

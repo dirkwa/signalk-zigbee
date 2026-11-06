@@ -9,6 +9,7 @@ import type { ServerAPI } from "@signalk/server-api";
 import {
   errMsg,
   listHostSerialDevices,
+  DEVICE_WATCH_INTERVAL_MS,
   ManagedContainer,
   probeHostDevice,
   resolveMount,
@@ -46,10 +47,16 @@ import {
   z2mContainer,
   z2mContainerName,
   Z2M_CONTAINER_PREFIX,
+  containerGone,
+  exitCheckNeeded,
   isCharacterDevice,
+  nextRetryAt,
+  recoveryEstablished,
+  recreateDeferred,
   usbCoordinatorProblem,
   type CoordinatorAccess,
 } from "./stack.js";
+import { settledWithin, untilAborted } from "./wait.js";
 
 function unpluggedMessage(serialPort: string): string {
   return `${serialPort} is unplugged; Zigbee2MQTT starts when it is plugged in`;
@@ -60,6 +67,12 @@ const SERIAL_GROUP = "dialout";
 const MANAGER_TIMEOUT_MS = 120_000;
 const STOP_ATTEMPTS = 3;
 const STOP_RETRY_MS = 10_000;
+/**
+ * How long stopping waits for a stick step in progress. A recreate cannot be
+ * cancelled once signalk-container runs it; the container's own stop queues
+ * behind it, so stopping need not wait for it to the end.
+ */
+const STICK_WORK_STOP_MS = 15_000;
 /**
  * How often to look for a Zigbee stick while no network is configured. Each
  * look starts a short-lived container under a containerized Signal K.
@@ -80,6 +93,14 @@ interface NetworkRun {
   frontendToken?: string;
   /** USB networks: follows the stick being unplugged and plugged back in. */
   watch?: HostDeviceWatch;
+  /** USB networks: looks for a Zigbee2MQTT container that exited. */
+  exitCheck?: ReturnType<typeof setInterval>;
+  /** USB networks: the stick handling in progress, one step at a time. */
+  stickWork?: Promise<void>;
+  /** Recreates by the exit check that failed in a row. */
+  exitFailures?: number;
+  /** No exit-check recreate before this time (ms since epoch). */
+  exitRetryAt?: number;
   /** The container's first start, which an unplug stop must not overtake. */
   starting?: Promise<unknown>;
 }
@@ -145,7 +166,7 @@ export class ZigbeeRunner {
     // The previous run's stick handler may still be stopping its container;
     // this run's container must not start before it is done.
     const settled = Promise.all(
-      [...this.runs.values()].map((run) => run.watch?.stop()),
+      [...this.runs.values()].map((run) => this.stopWatching(run)),
     );
     clearInterval(this.stickSearch);
     this.stickSearch = undefined;
@@ -204,8 +225,7 @@ export class ZigbeeRunner {
     clearInterval(this.stickSearch);
     this.stickSearch = undefined;
     for (const run of this.runs.values()) {
-      await run.watch?.stop();
-      run.watch = undefined;
+      await this.stopWatching(run);
     }
     this.discovery?.stop();
     this.discovery = undefined;
@@ -578,15 +598,87 @@ export class ZigbeeRunner {
       path: net.serialPort,
       initiallyAbsent: absent,
       isStarted: () => run.container !== undefined,
-      isHealthy: () =>
-        this.bridge?.isConnected === true
-          ? this.bridge.status().find((s) => s.id === net.id)?.online === true
-          : undefined,
-      onEvent: (event) => this.onStickEvent(run, event, signal),
+      isHealthy: () => this.networkOnline(net.id),
+      onEvent: (event) =>
+        this.queueStickWork(run, () => this.onStickEvent(run, event, signal)),
       debug: (msg) => {
         this.app.debug(msg);
       },
     });
+    // The watch only sees a stick that was gone when it looked. A drop
+    // shorter than its interval can still leave the container exited: the
+    // runtime restarted it while the node was missing, the create failed,
+    // and the runtime does not try again.
+    let checking = false;
+    run.exitCheck = setInterval(() => {
+      if (checking || signal.aborted) return;
+      checking = true;
+      void this.queueStickWork(run, () => this.restartIfExited(run, signal))
+        .catch((err: unknown) => {
+          this.app.debug(`${net.id}: container check failed: ${errMsg(err)}`);
+        })
+        .finally(() => {
+          checking = false;
+        });
+    }, DEVICE_WATCH_INTERVAL_MS);
+  }
+
+  /**
+   * Whether Zigbee2MQTT reports the network online; undefined while the
+   * bridge is not connected, since its last report may be stale then.
+   */
+  private networkOnline(networkId: string): boolean | undefined {
+    if (this.bridge?.isConnected !== true) return undefined;
+    return (
+      this.bridge.status().find((s) => s.id === networkId)?.online === true
+    );
+  }
+
+  private queueStickWork(
+    run: NetworkRun,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    const next = (run.stickWork ?? Promise.resolve()).then(work);
+    run.stickWork = next.catch(() => undefined);
+    return next;
+  }
+
+  private async stopWatching(run: NetworkRun): Promise<void> {
+    clearInterval(run.exitCheck);
+    run.exitCheck = undefined;
+    const done = Promise.all([run.watch?.stop(), run.stickWork]);
+    run.watch = undefined;
+    if (!(await settledWithin(done, STICK_WORK_STOP_MS))) {
+      this.app.debug(`${run.net.id}: stopping while a container step runs`);
+    }
+  }
+
+  private async restartIfExited(
+    run: NetworkRun,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { container, net } = run;
+    if (signal.aborted || container === undefined || !this.manager) return;
+    const online = this.networkOnline(net.id);
+    if (recoveryEstablished(online)) {
+      run.exitFailures = undefined;
+      run.exitRetryAt = undefined;
+    }
+    if (!exitCheckNeeded(run.phase, online)) return;
+    if (recreateDeferred("exited", Date.now(), run.exitRetryAt)) return;
+    const state = await untilAborted(container.getState(), signal);
+    // A running container keeps the back-off: one a stuck recreate could not
+    // fix is not recovered until Zigbee2MQTT is online or a recreate works.
+    if (signal.aborted || state === undefined || !containerGone(state)) return;
+    // A stick the probe reports missing is the watch's to handle; one it
+    // cannot tell about is tried, since the container is down either way.
+    const probe = await untilAborted(
+      probeHostDevice(this.manager, net.serialPort),
+      signal,
+    );
+    if (signal.aborted || probe?.exists === false) return;
+    this.app.debug(`${net.id}: Zigbee2MQTT ${state} with its stick plugged in`);
+    await this.recreate(run, "Zigbee2MQTT exited; restarting", signal);
   }
 
   private async onStickEvent(
@@ -600,12 +692,23 @@ export class ZigbeeRunner {
       await this.stopWhileUnplugged(run, signal);
       return;
     }
-    const container = run.container;
-    if (container === undefined) {
+    if (run.container === undefined) {
       await this.startUsbNetwork(net, signal);
       return;
     }
-    this.setPhase(net.id, "starting", "restarting Zigbee2MQTT");
+    if (recreateDeferred(event, Date.now(), run.exitRetryAt)) return;
+    await this.recreate(run, "restarting Zigbee2MQTT", signal);
+  }
+
+  private async recreate(
+    run: NetworkRun,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const { container, net } = run;
+    if (container === undefined || signal.aborted) return;
+    this.setPhase(net.id, "starting", message);
+    const attemptStart = Date.now();
     try {
       // A recreate, not a start: the stick may have come back as another
       // device node, which only a new container is given.
@@ -614,9 +717,22 @@ export class ZigbeeRunner {
         { signal },
       );
       if (signal.aborted) return;
+      // Any recreate that works, a replug's included, ends the exit check's
+      // back-off, so the next exit is again retried within one interval.
+      run.exitFailures = undefined;
+      run.exitRetryAt = undefined;
       this.setPhase(net.id, "running");
     } catch (err) {
       if (signal.aborted) return;
+      // A recreate that keeps failing (an image that cannot be pulled, say)
+      // must not hit the runtime on every check or stuck report.
+      const failures = (run.exitFailures ?? 0) + 1;
+      run.exitFailures = failures;
+      run.exitRetryAt = nextRetryAt(
+        attemptStart,
+        failures,
+        DEVICE_WATCH_INTERVAL_MS,
+      );
       this.setPhase(net.id, "error", errMsg(err));
     }
   }
