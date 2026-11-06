@@ -49,8 +49,8 @@ import {
   Z2M_CONTAINER_PREFIX,
   containerGone,
   exitCheckNeeded,
-  exitRetryDelayMs,
   isCharacterDevice,
+  nextRetryAt,
   recreateDeferred,
   usbCoordinatorProblem,
   type CoordinatorAccess,
@@ -696,6 +696,7 @@ export class ZigbeeRunner {
     const { container, net } = run;
     if (container === undefined) return;
     this.setPhase(net.id, "starting", message);
+    const attemptStart = Date.now();
     try {
       // A recreate, not a start: the stick may have come back as another
       // device node, which only a new container is given.
@@ -715,8 +716,11 @@ export class ZigbeeRunner {
       // must not hit the runtime on every check or stuck report.
       const failures = (run.exitFailures ?? 0) + 1;
       run.exitFailures = failures;
-      run.exitRetryAt =
-        Date.now() + exitRetryDelayMs(failures, DEVICE_WATCH_INTERVAL_MS);
+      run.exitRetryAt = nextRetryAt(
+        attemptStart,
+        failures,
+        DEVICE_WATCH_INTERVAL_MS,
+      );
       this.setPhase(net.id, "error", errMsg(err));
     }
   }

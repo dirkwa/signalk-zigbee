@@ -220,6 +220,19 @@ export function exitRetryDelayMs(failures: number, intervalMs: number): number {
 }
 
 /**
+ * When the next recreate may start, counted from when the failed one
+ * started: a slow failure (an image pull that timed out) does not stretch
+ * the gap between two attempts beyond the back-off.
+ */
+export function nextRetryAt(
+  attemptStart: number,
+  failures: number,
+  intervalMs: number,
+): number {
+  return attemptStart + exitRetryDelayMs(failures, intervalMs);
+}
+
+/**
  * Whether a recreate has to wait for the back-off after failed ones. A
  * replugged stick is recreated at once, since its new node is a real change;
  * an exited container and a stuck report wait.

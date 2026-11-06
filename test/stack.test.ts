@@ -13,6 +13,7 @@ import {
   isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
+  nextRetryAt,
   recreateDeferred,
   usbCoordinatorProblem,
   writeMosquittoFiles,
@@ -190,6 +191,19 @@ describe("exitRetryDelayMs", () => {
       expect(delay).toBe(MAX_EXIT_RETRY_MS - INTERVAL);
       expect(delay + INTERVAL).toBeLessThanOrEqual(MAX_EXIT_RETRY_MS);
     }
+  });
+});
+
+describe("nextRetryAt", () => {
+  const INTERVAL = 30_000;
+
+  it("counts the back-off from the start of the failed attempt", () => {
+    const start = 1_000_000;
+    expect(nextRetryAt(start, 1, INTERVAL)).toBe(start);
+    expect(nextRetryAt(start, 3, INTERVAL)).toBe(start + 120_000);
+    expect(nextRetryAt(start, 50, INTERVAL) - start).toBeLessThanOrEqual(
+      MAX_EXIT_RETRY_MS - INTERVAL,
+    );
   });
 });
 
