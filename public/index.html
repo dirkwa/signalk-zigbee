@@ -436,7 +436,7 @@
               { class: "actions" },
               net.phase === "running" ? pairingLine : null,
               net.phase === "running" ? pair : null,
-              net.phase === "running"
+              net.phase === "running" && net.managed !== false
                 ? el(
                     "a",
                     { href: frontend, target: "_blank", rel: "noopener" },

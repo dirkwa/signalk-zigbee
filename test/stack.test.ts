@@ -13,8 +13,10 @@ import {
   isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
+  mqttServer,
   nextRetryAt,
   recoveryEstablished,
+  redactUrl,
   recreateDeferred,
   usbCoordinatorProblem,
   writeMosquittoFiles,
@@ -142,6 +144,36 @@ describe("zigbee2mqtt", () => {
     expect(await ensureZ2mFiles(dir, usbNet!)).toEqual(first);
     const other = await ensureZ2mFiles(dir, esposNet!);
     expect(other.frontendToken).not.toBe(first.frontendToken);
+  });
+});
+
+describe("mqttServer", () => {
+  it("uses the managed broker on loopback by default", () => {
+    expect(mqttServer(applyDefaults({ brokerPort: 1884 }))).toBe(
+      "mqtt://127.0.0.1:1884",
+    );
+  });
+
+  it("uses the configured broker when containers are not managed", () => {
+    expect(
+      mqttServer(
+        applyDefaults({
+          manageContainers: false,
+          brokerUrl: "mqtt://broker.local:1883",
+        }),
+      ),
+    ).toBe("mqtt://broker.local:1883");
+  });
+});
+
+describe("redactUrl", () => {
+  it("hides the password and keeps the rest", () => {
+    expect(redactUrl("mqtt://user:secret@broker.local:1883")).toBe(
+      "mqtt://user:***@broker.local:1883",
+    );
+    expect(redactUrl("mqtt://broker.local:1883")).toBe(
+      "mqtt://broker.local:1883",
+    );
   });
 });
 

@@ -84,6 +84,13 @@ export interface DeviceOverride {
 }
 
 export interface Settings {
+  /**
+   * False: Mosquitto and Zigbee2MQTT run elsewhere, and the plugin only
+   * connects to `brokerUrl`.
+   */
+  manageContainers: boolean;
+  /** The broker to use when containers are not managed. */
+  brokerUrl: string;
   brokerPort: number;
   mosquittoTag: string;
   pathTemplate: string;
@@ -142,6 +149,8 @@ function network(raw: Raw, index: number): NetworkConfig {
 /** Signal K does not seed schema defaults into start(); this does. */
 export function applyDefaults(raw: Raw): Settings {
   return {
+    manageContainers: bool(raw.manageContainers, true),
+    brokerUrl: str(raw.brokerUrl, ""),
     brokerPort: int(raw.brokerPort, DEFAULT_BROKER_PORT),
     mosquittoTag: str(raw.mosquittoTag, MOSQUITTO_DEFAULT_TAG),
     pathTemplate: str(raw.pathTemplate, DEFAULT_PATH_TEMPLATE),
@@ -183,9 +192,21 @@ export function isSerialDirectory(serialPort: string): boolean {
   return SERIAL_DIRECTORY_PATTERN.test(posix.normalize(serialPort));
 }
 
+/** The URL schemes the MQTT client can connect with. */
+const BROKER_URL_PATTERN = /^(?:mqtts?|wss?):\/\/[^/\s]+/;
+
 /** Problems that make the configuration unusable, one sentence each. */
 export function validate(settings: Settings): string[] {
   const problems: string[] = [];
+  if (
+    !settings.manageContainers &&
+    !BROKER_URL_PATTERN.test(settings.brokerUrl)
+  ) {
+    problems.push(
+      "Without managed containers the plugin needs the URL of the MQTT " +
+        "broker, e.g. mqtt://192.168.1.10:1883.",
+    );
+  }
   const ids = new Set<string>();
   const ports = new Map<number, string>([[settings.brokerPort, "the broker"]]);
 
@@ -198,7 +219,8 @@ export function validate(settings: Settings): string[] {
     if (ids.has(net.id)) problems.push(`Network id "${net.id}" is used twice.`);
     ids.add(net.id);
 
-    if (!net.enabled) continue;
+    // Coordinator, image and port belong to a Zigbee2MQTT someone else runs.
+    if (!net.enabled || !settings.manageContainers) continue;
     const portOwner = ports.get(net.frontendPort);
     if (portOwner !== undefined) {
       problems.push(
@@ -356,6 +378,23 @@ export const CONFIG_SCHEMA = {
         },
       },
     },
+    manageContainers: {
+      type: "boolean",
+      title: "Run Mosquitto and Zigbee2MQTT",
+      description:
+        "Off: use a broker and Zigbee2MQTT that run elsewhere. The plugin " +
+        "then starts no containers and reads each network under the MQTT " +
+        "base topic zigbee2mqtt-<network id>; coordinator, image and port " +
+        "settings are not used.",
+      default: true,
+    },
+    brokerUrl: {
+      type: "string",
+      title: "MQTT broker URL",
+      description:
+        "Only without managed containers, e.g. mqtt://192.168.1.10:1883 " +
+        "or mqtt://user:password@host:1883.",
+    },
     brokerPort: {
       type: "integer",
       title: "MQTT broker port",
@@ -375,6 +414,8 @@ export const UI_SCHEMA = {
     "networks",
     "pathTemplate",
     "devices",
+    "manageContainers",
+    "brokerUrl",
     "brokerPort",
     "mosquittoTag",
   ],

@@ -53,7 +53,19 @@ export function z2mContainerName(networkId: string): string {
 }
 
 export function mqttServer(settings: Settings): string {
+  if (!settings.manageContainers) return settings.brokerUrl;
   return `mqtt://127.0.0.1:${settings.brokerPort}`;
+}
+
+/** The broker URL without a password, for status lines. */
+export function redactUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password !== "") parsed.password = "***";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return url;
+  }
 }
 
 /**
