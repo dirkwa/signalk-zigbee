@@ -315,6 +315,7 @@ export class ZigbeeRunner {
     settings: Settings,
     signal: AbortSignal,
   ): Promise<void> {
+    if (signal.aborted) return;
     if (!settings.manageContainers) {
       this.connectExternal(settings);
       return;
