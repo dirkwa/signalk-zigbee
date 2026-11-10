@@ -57,16 +57,16 @@ export function mqttServer(settings: Settings): string {
   return `mqtt://127.0.0.1:${settings.brokerPort}`;
 }
 
-/** The broker URL without a password, for status lines. */
+/** The broker's scheme and host, for status lines. */
 export function redactUrl(url: string): string {
-  // Never echo what does not parse as a URL with a host: "user:secret@broker"
-  // parses with "user:" as its scheme and would keep the password.
+  // Credentials can sit in the user info, the path or the query, so only the
+  // scheme and host are shown. "user:secret@broker" parses with "user:" as
+  // its scheme and no host, and gets the generic label.
   const unknown = "the configured MQTT broker";
   try {
     const parsed = new URL(url);
     if (parsed.host === "") return unknown;
-    if (parsed.password !== "") parsed.password = "***";
-    return parsed.toString().replace(/\/$/, "");
+    return `${parsed.protocol}//${parsed.host}`;
   } catch {
     return unknown;
   }

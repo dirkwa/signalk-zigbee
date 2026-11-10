@@ -167,9 +167,13 @@ describe("mqttServer", () => {
 });
 
 describe("redactUrl", () => {
-  it("hides the password and keeps the rest", () => {
+  it("shows only the scheme and host", () => {
     expect(redactUrl("mqtt://user:secret@broker.local:1883")).toBe(
-      "mqtt://user:***@broker.local:1883",
+      "mqtt://broker.local:1883",
+    );
+    expect(redactUrl("mqtt://token@broker.local")).toBe("mqtt://broker.local");
+    expect(redactUrl("wss://broker.example/mqtt?token=secret#x")).toBe(
+      "wss://broker.example",
     );
     expect(redactUrl("mqtt://broker.local:1883")).toBe(
       "mqtt://broker.local:1883",
