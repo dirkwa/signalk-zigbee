@@ -236,6 +236,18 @@ describe("ZigbeeBridge", () => {
     expect(bridge.status()[0]!.online).toBe(false);
   });
 
+  it("forgets the bridge state when the broker connection drops", () => {
+    makeBridge();
+    mqtt.emit("connect");
+    mqtt.deliver(`${BASE}/bridge/state`, { state: "online" });
+    mqtt.emit("close");
+    expect(bridge.status()[0]!.online).toBeUndefined();
+    mqtt.emit("connect");
+    expect(bridge.status()[0]!.online).toBeUndefined();
+    mqtt.deliver(`${BASE}/bridge/state`, { state: "online" });
+    expect(bridge.status()[0]!.online).toBe(true);
+  });
+
   describe("PUT", () => {
     beforeEach(() => {
       makeBridge();

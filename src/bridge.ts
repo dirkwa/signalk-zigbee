@@ -256,6 +256,9 @@ export class ZigbeeBridge {
     client.on("close", () => {
       if (!this.connected) return;
       this.connected = false;
+      // Wait for a fresh bridge/state: a broker that lost its retained
+      // messages would otherwise leave the last report standing.
+      for (const net of this.networks.values()) net.online = undefined;
       this.options.onChange?.();
     });
     client.on("error", (err) => {
