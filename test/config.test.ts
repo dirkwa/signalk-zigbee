@@ -106,7 +106,13 @@ describe("isSerialDirectory", () => {
 
 describe("validate", () => {
   it("needs a broker URL when containers are not managed", () => {
-    for (const brokerUrl of ["", "192.168.1.10:1883", "http://broker"]) {
+    for (const brokerUrl of [
+      "",
+      "192.168.1.10:1883",
+      "http://broker",
+      "mqtt://user:secret@[::1",
+      "mqtt://:1883",
+    ]) {
       expect(
         validate(applyDefaults({ manageContainers: false, brokerUrl })),
       ).toEqual([
@@ -117,6 +123,8 @@ describe("validate", () => {
       "mqtt://127.0.0.1:1883",
       "mqtts://user:pw@broker.local:8883",
       "ws://broker:9001",
+      "wss://broker.example/mqtt?token=abc",
+      "mqtt://[::1]:1883",
     ]) {
       expect(
         validate(applyDefaults({ manageContainers: false, brokerUrl })),

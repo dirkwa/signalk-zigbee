@@ -193,15 +193,24 @@ export function isSerialDirectory(serialPort: string): boolean {
 }
 
 /** The URL schemes the MQTT client can connect with. */
-const BROKER_URL_PATTERN = /^(?:mqtts?|wss?):\/\/[^/\s]+/;
+const BROKER_PROTOCOLS = new Set(["mqtt:", "mqtts:", "ws:", "wss:"]);
+
+/** A URL the MQTT client can connect to: known scheme, parseable, a host. */
+export function isBrokerUrl(url: string): boolean {
+  // Parsed here so a malformed URL never reaches the MQTT client, whose
+  // legacy parser warns with the URL, password included, on stderr.
+  try {
+    const parsed = new URL(url);
+    return BROKER_PROTOCOLS.has(parsed.protocol) && parsed.hostname !== "";
+  } catch {
+    return false;
+  }
+}
 
 /** Problems that make the configuration unusable, one sentence each. */
 export function validate(settings: Settings): string[] {
   const problems: string[] = [];
-  if (
-    !settings.manageContainers &&
-    !BROKER_URL_PATTERN.test(settings.brokerUrl)
-  ) {
+  if (!settings.manageContainers && !isBrokerUrl(settings.brokerUrl)) {
     problems.push(
       "Without managed containers the plugin needs the URL of the MQTT " +
         "broker, e.g. mqtt://192.168.1.10:1883.",
