@@ -186,8 +186,10 @@
         return node;
       }
 
-      function stateOf(net) {
+      function stateOf(net, brokerConnected) {
         if (net.phase === "running") {
+          // A network's last report says nothing while MQTT is down.
+          if (brokerConnected === false) return ["MQTT disconnected", "warn"];
           if (net.online === true) return ["online", "ok"];
           if (net.online === false) return ["Zigbee2MQTT offline", "bad"];
           return ["Zigbee2MQTT starting", "warn"];
@@ -390,8 +392,8 @@
         );
       }
 
-      function network(net) {
-        const [label, cls] = stateOf(net);
+      function network(net, brokerConnected) {
+        const [label, cls] = stateOf(net, brokerConnected);
         const token = tokens[net.id];
         const frontend =
           `${location.protocol}//${location.hostname}:${net.frontendPort}/` +
@@ -503,7 +505,9 @@
             ),
           );
         }
-        nodes.push(...status.networks.map(network));
+        nodes.push(
+          ...status.networks.map((net) => network(net, status.brokerConnected)),
+        );
         if (status.usbSticks?.length) {
           nodes.push(
             el(

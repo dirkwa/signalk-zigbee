@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import mqtt from "mqtt";
 import type { ActionResult } from "@signalk/server-api";
 import { PLUGIN_ID, type DeviceOverride } from "./config.js";
+import { redactUrl } from "./stack.js";
 import {
   deviceMappings,
   devicePath,
@@ -249,7 +250,7 @@ export class ZigbeeBridge {
           if (err) this.app.error(`MQTT subscribe failed: ${err.message}`);
         });
       }
-      this.app.debug(`MQTT connected to ${this.options.url}`);
+      this.app.debug(`MQTT connected to ${redactUrl(this.options.url)}`);
       this.options.onChange?.();
     });
     client.on("close", () => {

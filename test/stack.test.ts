@@ -175,6 +175,12 @@ describe("redactUrl", () => {
       "mqtt://broker.local:1883",
     );
   });
+
+  it("never echoes a URL it cannot parse", () => {
+    for (const url of ["user:secret@broker", "mqtt://[bad", ""]) {
+      expect(redactUrl(url)).toBe("the configured MQTT broker");
+    }
+  });
 });
 
 describe("isCharacterDevice", () => {

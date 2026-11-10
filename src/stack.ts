@@ -59,12 +59,16 @@ export function mqttServer(settings: Settings): string {
 
 /** The broker URL without a password, for status lines. */
 export function redactUrl(url: string): string {
+  // Never echo what does not parse as a URL with a host: "user:secret@broker"
+  // parses with "user:" as its scheme and would keep the password.
+  const unknown = "the configured MQTT broker";
   try {
     const parsed = new URL(url);
+    if (parsed.host === "") return unknown;
     if (parsed.password !== "") parsed.password = "***";
     return parsed.toString().replace(/\/$/, "");
   } catch {
-    return url;
+    return unknown;
   }
 }
 
