@@ -638,31 +638,34 @@ export class ZigbeeRunner {
       what = `espOS coordinator ${found.name} (${found.address})`;
     }
     const adopted = applyDefaults({ ...settings, networks: [network] });
+    // Held until start() has the new network, so a second pick finds it.
     this.choosing = true;
     try {
-      await new Promise<void>((resolve, reject) => {
-        this.app.savePluginOptions(adopted, (err) => {
-          if (err) reject(err);
-          else resolve();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          this.app.savePluginOptions(adopted, (err) => {
+            if (err) reject(err);
+            else resolve();
+          });
         });
-      });
-    } catch (err) {
-      this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
-      throw err;
+      } catch (err) {
+        this.app.error(`saving the Zigbee network failed: ${errMsg(err)}`);
+        throw err;
+      }
+      if (signal.aborted) return;
+      this.app.debug(`using ${what} as network main`);
+      // start() expects stop() to have run.
+      this.discovery?.stop();
+      this.discovery = undefined;
+      const bridge = this.bridge;
+      await bridge?.stop();
+      // A start() during the await owns this.bridge now, maybe with a new one.
+      if (signal.aborted) return;
+      if (this.bridge === bridge) this.bridge = undefined;
+      this.start(adopted);
     } finally {
       this.choosing = false;
     }
-    if (signal.aborted) return;
-    this.app.debug(`using ${what} as network main`);
-    // start() expects stop() to have run.
-    this.discovery?.stop();
-    this.discovery = undefined;
-    const bridge = this.bridge;
-    await bridge?.stop();
-    // A start() during the await owns this.bridge now, maybe with a new one.
-    if (signal.aborted) return;
-    if (this.bridge === bridge) this.bridge = undefined;
-    this.start(adopted);
   }
 
   /**
