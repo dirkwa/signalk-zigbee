@@ -15,6 +15,8 @@ const USB =
 describe("applyDefaults", () => {
   it("fills an empty config", () => {
     expect(applyDefaults({})).toEqual({
+      manageContainers: true,
+      brokerUrl: "",
       brokerPort: 1883,
       mosquittoTag: "2.0.22",
       pathTemplate: "zigbee.{network}.{name}",
@@ -103,6 +105,48 @@ describe("isSerialDirectory", () => {
 });
 
 describe("validate", () => {
+  it("needs a broker URL when containers are not managed", () => {
+    for (const brokerUrl of [
+      "",
+      "192.168.1.10:1883",
+      "http://broker",
+      "mqtt://user:secret@[::1",
+      "mqtt://:1883",
+    ]) {
+      expect(
+        validate(applyDefaults({ manageContainers: false, brokerUrl })),
+      ).toEqual([
+        "Without managed containers the plugin needs the URL of the MQTT broker, e.g. mqtt://192.168.1.10:1883.",
+      ]);
+    }
+    for (const brokerUrl of [
+      "mqtt://127.0.0.1:1883",
+      "mqtts://user:pw@broker.local:8883",
+      "ws://broker:9001",
+      "wss://broker.example/mqtt?token=abc",
+      "mqtt://[::1]:1883",
+    ]) {
+      expect(
+        validate(applyDefaults({ manageContainers: false, brokerUrl })),
+      ).toEqual([]);
+    }
+  });
+
+  it("skips coordinator and port checks for an external Zigbee2MQTT", () => {
+    expect(
+      validate(
+        applyDefaults({
+          manageContainers: false,
+          brokerUrl: "mqtt://127.0.0.1:1883",
+          networks: [
+            { id: "freezer", coordinator: "espos", frontendPort: 1883 },
+            { id: "main" },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
   it("accepts a USB and an espOS network side by side", () => {
     expect(
       validate(

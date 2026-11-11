@@ -53,7 +53,23 @@ export function z2mContainerName(networkId: string): string {
 }
 
 export function mqttServer(settings: Settings): string {
+  if (!settings.manageContainers) return settings.brokerUrl;
   return `mqtt://127.0.0.1:${settings.brokerPort}`;
+}
+
+/** The broker's scheme and host, for status lines. */
+export function redactUrl(url: string): string {
+  // Credentials can sit in the user info, the path or the query, so only the
+  // scheme and host are shown. "user:secret@broker" parses with "user:" as
+  // its scheme and no host, and gets the generic label.
+  const unknown = "the configured MQTT broker";
+  try {
+    const parsed = new URL(url);
+    if (parsed.host === "") return unknown;
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return unknown;
+  }
 }
 
 /**

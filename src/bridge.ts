@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import mqtt from "mqtt";
 import type { ActionResult } from "@signalk/server-api";
 import { PLUGIN_ID, type DeviceOverride } from "./config.js";
+import { redactUrl } from "./stack.js";
 import {
   deviceMappings,
   devicePath,
@@ -249,12 +250,15 @@ export class ZigbeeBridge {
           if (err) this.app.error(`MQTT subscribe failed: ${err.message}`);
         });
       }
-      this.app.debug(`MQTT connected to ${this.options.url}`);
+      this.app.debug(`MQTT connected to ${redactUrl(this.options.url)}`);
       this.options.onChange?.();
     });
     client.on("close", () => {
       if (!this.connected) return;
       this.connected = false;
+      // Wait for a fresh bridge/state: a broker that lost its retained
+      // messages would otherwise leave the last report standing.
+      for (const net of this.networks.values()) net.online = undefined;
       this.options.onChange?.();
     });
     client.on("error", (err) => {

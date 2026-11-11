@@ -87,6 +87,17 @@ that network's Zigbee2MQTT when the coordinator announces a new address.
 Coordinators seen on mDNS that no network uses yet are listed in the plugin
 status and in the web app.
 
+### Existing broker and Zigbee2MQTT
+
+Where Mosquitto and Zigbee2MQTT already run elsewhere, or the host has no
+container runtime, switch off **Run Mosquitto and Zigbee2MQTT** and set
+**MQTT broker URL** (e.g. `mqtt://192.168.1.10:1883`, credentials as
+`mqtt://user:password@host:1883`). The plugin then starts no containers and
+reads each enabled network from the MQTT base topic `zigbee2mqtt-<network id>`,
+so set Zigbee2MQTT's `mqtt.base_topic` to match. Only the network id matters
+then; coordinator, image and port settings are not used, and the espOS
+address is shown in the web app as given.
+
 ### Web interface access
 
 Host networking puts each Zigbee2MQTT web interface on the LAN, where it

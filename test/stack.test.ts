@@ -13,8 +13,10 @@ import {
   isCharacterDevice,
   mosquittoConf,
   mosquittoContainer,
+  mqttServer,
   nextRetryAt,
   recoveryEstablished,
+  redactUrl,
   recreateDeferred,
   usbCoordinatorProblem,
   writeMosquittoFiles,
@@ -142,6 +144,46 @@ describe("zigbee2mqtt", () => {
     expect(await ensureZ2mFiles(dir, usbNet!)).toEqual(first);
     const other = await ensureZ2mFiles(dir, esposNet!);
     expect(other.frontendToken).not.toBe(first.frontendToken);
+  });
+});
+
+describe("mqttServer", () => {
+  it("uses the managed broker on loopback by default", () => {
+    expect(mqttServer(applyDefaults({ brokerPort: 1884 }))).toBe(
+      "mqtt://127.0.0.1:1884",
+    );
+  });
+
+  it("uses the configured broker when containers are not managed", () => {
+    expect(
+      mqttServer(
+        applyDefaults({
+          manageContainers: false,
+          brokerUrl: "mqtt://broker.local:1883",
+        }),
+      ),
+    ).toBe("mqtt://broker.local:1883");
+  });
+});
+
+describe("redactUrl", () => {
+  it("shows only the scheme and host", () => {
+    expect(redactUrl("mqtt://user:secret@broker.local:1883")).toBe(
+      "mqtt://broker.local:1883",
+    );
+    expect(redactUrl("mqtt://token@broker.local")).toBe("mqtt://broker.local");
+    expect(redactUrl("wss://broker.example/mqtt?token=secret#x")).toBe(
+      "wss://broker.example",
+    );
+    expect(redactUrl("mqtt://broker.local:1883")).toBe(
+      "mqtt://broker.local:1883",
+    );
+  });
+
+  it("never echoes a URL it cannot parse", () => {
+    for (const url of ["user:secret@broker", "mqtt://[bad", ""]) {
+      expect(redactUrl(url)).toBe("the configured MQTT broker");
+    }
   });
 });
 

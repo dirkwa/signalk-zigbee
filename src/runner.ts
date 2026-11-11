@@ -43,6 +43,7 @@ import {
   MOSQUITTO_CONTAINER,
   MOSQUITTO_DATA_MOUNT,
   mqttServer,
+  redactUrl,
   writeMosquittoFiles,
   z2mContainer,
   z2mContainerName,
@@ -107,6 +108,8 @@ interface NetworkRun {
 
 export interface NetworkReport {
   id: string;
+  /** False when Zigbee2MQTT runs elsewhere and the plugin only reads it. */
+  managed: boolean;
   coordinator: NetworkConfig["coordinator"];
   phase: NetworkPhase;
   message?: string;
@@ -251,15 +254,23 @@ export class ZigbeeRunner {
       brokerConnected: this.bridge?.isConnected ?? false,
       networks: [...this.runs.values()].map((run) => {
         const live = bridgeStatus.get(run.net.id);
+        const managed = this.settings?.manageContainers ?? true;
         return {
           id: run.net.id,
+          managed,
           coordinator: run.net.coordinator,
           phase: run.phase,
           message: run.message,
           image: `${z2mImage(run.net).image}:${z2mImage(run.net).tag}`,
           frontendPort: run.net.frontendPort,
           baseTopic: baseTopic(run.net.id),
-          coordinatorAddress: run.serialPort,
+          // Without managed containers, the configured espOS address is all
+          // the plugin knows of the coordinator.
+          coordinatorAddress:
+            run.serialPort ??
+            (managed || run.net.coordinator !== "espos"
+              ? undefined
+              : run.net.esposAddress || undefined),
           online: live?.online,
           pairingSeconds: live?.pairingSeconds,
           devices: live?.devices ?? [],
@@ -304,6 +315,11 @@ export class ZigbeeRunner {
     settings: Settings,
     signal: AbortSignal,
   ): Promise<void> {
+    if (signal.aborted) return;
+    if (!settings.manageContainers) {
+      this.connectExternal(settings);
+      return;
+    }
     const { manager, runtime } = await waitForContainerManager({
       timeoutMs: MANAGER_TIMEOUT_MS,
       signal,
@@ -373,16 +389,7 @@ export class ZigbeeRunner {
     await this.broker.start(settings.mosquittoTag, { signal });
     if (signal.aborted) return;
 
-    this.bridge = new ZigbeeBridge(this.app, {
-      url: mqttServer(settings),
-      networks: settings.networks
-        .filter((net) => net.enabled)
-        .map((net) => ({ id: net.id, baseTopic: baseTopic(net.id) })),
-      pathTemplate: settings.pathTemplate,
-      overrides: settings.devices,
-      onChange: () => this.report(),
-    });
-    this.bridge.start();
+    this.startBridge(settings);
 
     await this.stopOrphans(manager, settings);
     if (signal.aborted) return;
@@ -413,6 +420,33 @@ export class ZigbeeRunner {
     const reconcile = this.esposChain.then(() => this.reconcileEspos(signal));
     this.esposChain = reconcile.catch(() => undefined);
     await reconcile;
+    this.report();
+  }
+
+  private startBridge(settings: Settings): void {
+    this.bridge = new ZigbeeBridge(this.app, {
+      url: mqttServer(settings),
+      networks: settings.networks
+        .filter((net) => net.enabled)
+        .map((net) => ({ id: net.id, baseTopic: baseTopic(net.id) })),
+      pathTemplate: settings.pathTemplate,
+      overrides: settings.devices,
+      onChange: () => this.report(),
+    });
+    this.bridge.start();
+  }
+
+  /**
+   * Broker and Zigbee2MQTT run elsewhere: no containers, no stick search and
+   * no mDNS, only the bridge. Each enabled network counts as running; its
+   * Zigbee2MQTT's own bridge/state tells whether it is online.
+   */
+  private connectExternal(settings: Settings): void {
+    this.progress(`Connecting to ${redactUrl(settings.brokerUrl)}`);
+    this.startBridge(settings);
+    for (const net of settings.networks.filter((n) => n.enabled)) {
+      this.setPhase(net.id, "running");
+    }
     this.report();
   }
 
